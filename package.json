@@ -1,8 +1,0 @@
-{
-  "name": "izin-portali-vercel",
-  "private": true,
-  "version": "1.0.0",
-  "dependencies": {
-    "firebase-admin": "^12.6.0"
-  }
-}
