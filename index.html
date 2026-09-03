@@ -81,7 +81,6 @@ const firebaseConfig = {
   appId: "1:1073816187669:web:40a73a49133f5f1caeef1c"
 };
 
-
 // Bu site Vercel'e yüklendiğinde admin işlemleri (çalışan ekleme, toplu içeri
 // aktarma, çalışan silme, şifre değiştirme) aynı sitedeki /api fonksiyonlarını
 // kullanır — değiştirmenize gerek yok, boş bırakılırsa otomatik olarak
@@ -687,21 +686,13 @@ function employeeDashboardView() {
             <i data-lucide="clock" class="w-[18px] h-[18px]"></i>
           </div>
           <div>
-            <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Çalışma Saatleri</h2>
-            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Size tanımlanmış mesai aralığı</p>
+            <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Çalışma Bilgisi</h2>
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Size tanımlanmış esnek bakiye ve notlar</p>
           </div>
         </div>
         <div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
           <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
-            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Başlangıç</p>
-            <p class="mt-1 font-display text-xl font-bold text-pine-700 dark:text-gold-400">${timeShort(p.flexible_hours_start)}</p>
-          </div>
-          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
-            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Bitiş</p>
-            <p class="mt-1 font-display text-xl font-bold text-pine-700 dark:text-gold-400">${timeShort(p.flexible_hours_end)}</p>
-          </div>
-          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
-            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Saat Bakiyesi</p>
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Esnek Bakiye</p>
             <p class="mt-1 font-display text-xl font-bold ${p.flex_time_balance < 0 ? 'text-brick-500' : 'text-pine-700 dark:text-gold-400'}">${fmtHours(p.flex_time_balance)}</p>
           </div>
           <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
@@ -1154,7 +1145,7 @@ function adminEmployeesView() {
         <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
       </td>
       <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
-      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${timeShort(e.flexible_hours_start)} – ${timeShort(e.flexible_hours_end)}</td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 ${e.flex_time_balance < 0 ? 'text-brick-500 dark:text-brick-500' : ''}">${fmtHours(e.flex_time_balance)}</td>
       <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
       <td class="px-5 py-3.5">
         <div class="flex justify-end gap-1">
@@ -1205,8 +1196,6 @@ const COLUMN_MAP = {
   last_name: ['last_name', 'soyad'],
   department: ['department', 'departman'],
   annual_leave_total: ['annual_leave_total', 'yillik_izin', 'yillik izin hakki', 'izin_hakki'],
-  flexible_hours_start: ['flexible_hours_start', 'mesai_baslangic', 'baslangic'],
-  flexible_hours_end: ['flexible_hours_end', 'mesai_bitis', 'bitis'],
   password: ['password', 'sifre', 'şifre']
 };
 function normalizeKey(key) {
@@ -1256,8 +1245,6 @@ function adminImportView() {
             <th class="px-2 py-2 font-medium">Sicil No</th>
             <th class="px-2 py-2 font-medium">Departman</th>
             <th class="px-2 py-2 font-medium">İzin Hakkı</th>
-            <th class="px-2 py-2 font-medium">Başlangıç</th>
-            <th class="px-2 py-2 font-medium">Bitiş</th>
             <th class="px-2 py-2 font-medium">Şifre (boş=otomatik)</th>
             <th class="px-2 py-2 font-medium"></th>
           </tr></thead>
@@ -1268,8 +1255,6 @@ function adminImportView() {
               <td class="px-1.5 py-1.5"><input class="bulk-cell w-20 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="registry_number" value="${escapeHtml(r.registry_number || '')}" /></td>
               <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="department" value="${escapeHtml(r.department || '')}" /></td>
               <td class="px-1.5 py-1.5"><input type="number" class="bulk-cell w-16 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="annual_leave_total" value="${escapeHtml(r.annual_leave_total ?? 14)}" /></td>
-              <td class="px-1.5 py-1.5"><input type="time" class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="flexible_hours_start" value="${escapeHtml(r.flexible_hours_start || '09:00')}" /></td>
-              <td class="px-1.5 py-1.5"><input type="time" class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="flexible_hours_end" value="${escapeHtml(r.flexible_hours_end || '18:00')}" /></td>
               <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="password" value="${escapeHtml(r.password || '')}" placeholder="otomatik" /></td>
               <td class="px-1.5 py-1.5">
                 <button data-action="remove-bulk-row" data-index="${i}" class="flex h-7 w-7 items-center justify-center rounded text-ink-800/40 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/40" aria-label="Satırı sil">
@@ -1312,7 +1297,7 @@ function adminImportView() {
       </div>
       <h3 class="mt-3 font-display text-sm font-semibold text-ink-900 dark:text-sand-50">Dosya Formatı</h3>
       <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
-        Dosyanız şu kolonları içermelidir: <strong>registry_number, first_name, last_name, department, annual_leave_total, flexible_hours_start, flexible_hours_end</strong>.
+        Dosyanız şu kolonları içermelidir: <strong>registry_number, first_name, last_name, department, annual_leave_total</strong>.
         Türkçe başlıklar (Sicil No, Ad, Soyad, Departman, Yıllık İzin) da otomatik tanınır. İsteğe bağlı bir <strong>password</strong> kolonu eklerseniz o şifre kullanılır; eklemezseniz her çalışan için otomatik bir şifre üretilir ve sonuç listesinde gösterilir.
       </p>
       <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
@@ -1389,13 +1374,9 @@ function employeeModal(emp) {
           <div><label class="label">Yıllık İzin Hakkı (gün)</label><input name="annual_leave_total" type="number" min="0" required class="input" value="${isEdit ? emp.annual_leave_total : 14}" /></div>
           ${isEdit ? `<div><label class="label">Kullanılan İzin (gün)</label><input name="annual_leave_used" type="number" min="0" required class="input" value="${emp.annual_leave_used}" /></div>` : ''}
         </div>
-        <div class="grid grid-cols-2 gap-4">
-          <div><label class="label">Mesai Başlangıç</label><input name="flexible_hours_start" type="time" class="input" value="${isEdit ? timeShort(emp.flexible_hours_start) : '09:00'}" /></div>
-          <div><label class="label">Mesai Bitiş</label><input name="flexible_hours_end" type="time" class="input" value="${isEdit ? timeShort(emp.flexible_hours_end) : '18:00'}" /></div>
-        </div>
         <div><label class="label">Esnek Çalışma Notu</label><input name="flexible_work_note" class="input" value="${isEdit ? escapeHtml(emp.flexible_work_note || '') : 'Standart mesai'}" /></div>
         <div class="grid grid-cols-2 gap-4">
-          <div><label class="label">Saat Bakiyesi (borç/alacak, örn. -7,5)</label><input name="flex_time_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.flex_time_balance ?? 0) : 0}" /></div>
+          <div><label class="label">Esnek Bakiye (örn. -7,5)</label><input name="flex_time_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.flex_time_balance ?? 0) : 0}" /></div>
           <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
         </div>
         ${isEdit ? `
@@ -1552,7 +1533,7 @@ document.addEventListener('click', async (e) => {
     case 'add-bulk-row':
       state.bulkRows = [...state.bulkRows, {
         first_name: '', last_name: '', registry_number: '', department: '',
-        annual_leave_total: 14, flexible_hours_start: '09:00', flexible_hours_end: '18:00', password: ''
+        annual_leave_total: 14, password: ''
       }];
       render();
       break;
@@ -1726,8 +1707,6 @@ document.addEventListener('submit', async (e) => {
           department,
           annualLeaveTotal: Number(fd.get('annual_leave_total')),
           annualLeaveUsed: Number(fd.get('annual_leave_used')),
-          flexibleHoursStart: fd.get('flexible_hours_start'),
-          flexibleHoursEnd: fd.get('flexible_hours_end'),
           flexibleWorkNote: fd.get('flexible_work_note'),
           flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
           deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0
@@ -1749,8 +1728,6 @@ document.addEventListener('submit', async (e) => {
           department,
           role: fd.get('is_admin') ? 'admin' : 'employee',
           annual_leave_total: Number(fd.get('annual_leave_total')),
-          flexible_hours_start: fd.get('flexible_hours_start'),
-          flexible_hours_end: fd.get('flexible_hours_end'),
           flexible_work_note: fd.get('flexible_work_note'),
           flex_time_balance: Number(fd.get('flex_time_balance')) || 0,
           deducted_hours_balance: Number(fd.get('deducted_hours_balance')) || 0
@@ -1914,7 +1891,7 @@ function parseBulkFile(file) {
 }
 
 function downloadTemplate() {
-  const csv = 'registry_number,first_name,last_name,department,annual_leave_total,flexible_hours_start,flexible_hours_end,password\n1024,Ayşe,Yılmaz,Muhasebe,14,09:00,18:00,\n';
+  const csv = 'registry_number,first_name,last_name,department,annual_leave_total,password\n1024,Ayşe,Yılmaz,Muhasebe,14,\n';
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
