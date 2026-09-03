@@ -1,0 +1,1964 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>İzin & Duyuru Portalı</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link
+  href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap"
+  rel="stylesheet"
+/>
+
+<!-- Tailwind (CDN, build adımı gerekmez) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['"Sora"', 'system-ui', 'sans-serif'],
+          body: ['"Inter"', 'system-ui', 'sans-serif']
+        },
+        colors: {
+          pine: {
+            50: '#eef4f2', 100: '#d6e6e1', 200: '#adcdc4', 300: '#7fb0a2',
+            400: '#4c8c7c', 500: '#2f6f5f', 600: '#205c52', 700: '#1a4a43',
+            800: '#163f38', 900: '#122f2a', 950: '#0b1d1a'
+          },
+          sand: { 50: '#faf8f4', 100: '#f5f1e8', 200: '#eadfc8' },
+          gold: { 400: '#dba648', 500: '#c98a2c', 600: '#a86f1f' },
+          brick: { 500: '#b3413b', 600: '#963530' },
+          ink: { 900: '#101715', 800: '#16201d', 700: '#1e2b27' }
+        },
+        boxShadow: {
+          soft: '0 1px 2px rgba(16,23,21,0.06), 0 8px 24px -12px rgba(16,23,21,0.18)'
+        },
+        borderRadius: { xl2: '1.1rem' }
+      }
+    }
+  };
+</script>
+
+<!-- Firebase istemcisi (compat sürüm — build adımı gerekmez) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
+<!-- CSV / Excel ayrıştırma (Toplu Ekleme için) -->
+<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- İkonlar -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+
+<style>
+  html { scroll-behavior: smooth; }
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  ::selection { background: #adcdc4; color: #122f2a; }
+  *:focus-visible { outline: 2px solid #205c52; outline-offset: 2px; }
+  .card { }
+  .modal-backdrop { background: rgba(0,0,0,0.4); }
+  [data-lucide] { display: inline-block; }
+</style>
+</head>
+<body class="bg-sand-50 dark:bg-ink-900 text-ink-900 dark:text-sand-100 transition-colors">
+
+<div id="app"></div>
+
+<script>
+/* =====================================================================
+   AYARLAR — Firebase proje bilgilerinizi buraya girin
+   (Firebase Console > Project Settings > General > Your apps > Web app > SDK setup and configuration)
+   ===================================================================== */
+const firebaseConfig = {
+  apiKey: "AIzaSyADpucVQrCF3C0GF1RgWY0pAbaxiMxjl9E",
+  authDomain: "izin-portali.firebaseapp.com",
+  projectId: "izin-portali",
+  storageBucket: "izin-portali.firebasestorage.app",
+  messagingSenderId: "1073816187669",
+  appId: "1:1073816187669:web:40a73a49133f5f1caeef1c"
+};
+
+
+// Bu site Vercel'e yüklendiğinde admin işlemleri (çalışan ekleme, toplu içeri
+// aktarma, çalışan silme, şifre değiştirme) aynı sitedeki /api fonksiyonlarını
+// kullanır — değiştirmenize gerek yok, boş bırakılırsa otomatik olarak
+// sitenin kendi adresi kullanılır.
+const FUNCTIONS_BASE = '';
+
+firebase.initializeApp(firebaseConfig);
+const fbAuth = firebase.auth();
+const db = firebase.firestore();
+
+// Firestore'dan gelen alan adları (camelCase) ile uygulamanın geri kalanının
+// beklediği alan adlarını (snake_case) eşleştiren yardımcı fonksiyonlar.
+function normalizeProfile(id, d) {
+  return {
+    id,
+    email: d.email,
+    registry_number: d.registryNumber,
+    first_name: d.firstName,
+    last_name: d.lastName,
+    department: d.department,
+    role: d.role,
+    annual_leave_total: d.annualLeaveTotal,
+    annual_leave_used: d.annualLeaveUsed,
+    flexible_hours_start: d.flexibleHoursStart,
+    flexible_hours_end: d.flexibleHoursEnd,
+    flexible_work_note: d.flexibleWorkNote,
+    flex_time_balance: d.flexTimeBalance ?? 0,
+    deducted_hours_balance: d.deductedHoursBalance ?? 0
+  };
+}
+function normalizeAnnouncement(id, d) {
+  return {
+    id,
+    title: d.title,
+    content: d.content,
+    published_at: d.publishedAt && d.publishedAt.toDate ? d.publishedAt.toDate().toISOString() : d.publishedAt
+  };
+}
+function normalizeReport(id, d) {
+  return {
+    id,
+    type: d.type,
+    risk_level: d.riskLevel,
+    description: d.description,
+    date: d.date,
+    shift: d.shift,
+    department: d.department,
+    photo: d.photo || null,
+    status: d.status || 'yeni',
+    submitted_by: d.submittedBy,
+    submitter_name: d.submitterName,
+    created_at: d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt
+  };
+}
+async function loadMyReports(uid) {
+  try {
+    const snap = await db.collection('reports').where('submittedBy', '==', uid).get();
+    state.myReports = snap.docs
+      .map(d => normalizeReport(d.id, d.data()))
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  } catch (err) {
+    console.error('Bildirimler alınamadı:', err.message);
+    state.myReports = [];
+  }
+}
+async function loadAllReports() {
+  try {
+    const snap = await db.collection('reports').get();
+    state.allReports = snap.docs
+      .map(d => normalizeReport(d.id, d.data()))
+      .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+  } catch (err) {
+    console.error('Bildirimler alınamadı:', err.message);
+    state.allReports = [];
+  }
+}
+function normalizePeriodicCheck(id, d) {
+  return {
+    id,
+    employee_id: d.employeeId,
+    employee_name: d.employeeName,
+    department: d.department,
+    check_type: d.checkType,
+    due_date: d.dueDate,
+    status: d.status || 'yaklasiyor',
+    created_at: d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt
+  };
+}
+async function loadAllPeriodicChecks() {
+  try {
+    const snap = await db.collection('periodicChecks').get();
+    state.periodicChecks = snap.docs
+      .map(d => normalizePeriodicCheck(d.id, d.data()))
+      .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0));
+  } catch (err) {
+    console.error('Periyodik kontroller alınamadı:', err.message);
+    state.periodicChecks = [];
+  }
+}
+async function loadMyPeriodicChecks(uid) {
+  try {
+    const snap = await db.collection('periodicChecks').where('employeeId', '==', uid).get();
+    state.myPeriodicChecks = snap.docs
+      .map(d => normalizePeriodicCheck(d.id, d.data()))
+      .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0));
+  } catch (err) {
+    console.error('Periyodik kontroller alınamadı:', err.message);
+    state.myPeriodicChecks = [];
+  }
+}
+async function callFunction(name, body) {
+  const idToken = await fbAuth.currentUser.getIdToken();
+  const res = await fetch(`${FUNCTIONS_BASE}/api/${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${idToken}` },
+    body: JSON.stringify(body)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'İşlem başarısız oldu.');
+  return data;
+}
+
+/* =====================================================================
+   GENEL DURUM (state)
+   ===================================================================== */
+const state = {
+  session: null,
+  profile: null,
+  loading: true,
+  sidebarOpen: false,
+  employees: [],
+  announcements: [],
+  bulkRows: [],
+  bulkFileName: '',
+  bulkResults: null,
+  bulkImporting: false,
+  modal: null, // { type: 'employee'|'announcement', data: {...} | null }
+  myReports: [],
+  allReports: [],
+  reportPhotoData: null,
+  reportSubmitting: false,
+  reportFormError: '',
+  adminReportFilter: 'hepsi',
+  periodicChecks: [],
+  myPeriodicChecks: []
+};
+
+/* =====================================================================
+   YARDIMCI FONKSİYONLAR
+   ===================================================================== */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function fmtDate(iso) {
+  try {
+    return new Intl.DateTimeFormat('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' })
+      .format(new Date(iso));
+  } catch { return iso; }
+}
+
+function timeShort(t) { return t ? String(t).slice(0, 5) : '—'; }
+function fmtHours(n) {
+  const num = Number(n) || 0;
+  const str = num.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return `${str} saat`;
+}
+
+// Bir fotoğraf dosyasını tarayıcıda küçültüp base64'e çevirir (Firestore belge
+// boyutu sınırı 1MB olduğu için; ayrıca ücretli Storage aboneliği gerekmez).
+function compressImageToBase64(file, maxWidth = 900, quality = 0.6) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+const REPORT_TYPE_LABELS = { oneri: 'Öneri', ramak_kala: 'Ramak Kala' };
+const RISK_LABELS = { dusuk: 'Düşük', orta: 'Orta', yuksek: 'Yüksek' };
+const RISK_COLORS = {
+  dusuk: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300',
+  orta: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
+  yuksek: 'bg-brick-500/10 text-brick-600 dark:text-brick-500'
+};
+const STATUS_LABELS = { yeni: 'Yeni', inceleniyor: 'İnceleniyor', kapatildi: 'Kapatıldı' };
+const STATUS_COLORS = {
+  yeni: 'bg-brick-500/10 text-brick-600 dark:text-brick-500',
+  inceleniyor: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
+  kapatildi: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300'
+};
+
+const CHECK_TYPE_LABELS = {
+  saglik: 'Periyodik Sağlık Kontrolü',
+  revir: 'Revir Kontrolü',
+  hastane: 'Hastane Kontrolü',
+  egitim: 'Eğitim'
+};
+const PERIODIC_STATUS_LABELS = {
+  tamamlandi: 'Tamamlandı',
+  gecikti: 'Gecikti',
+  yaklasiyor: 'Yaklaşıyor',
+  revire_gitmeli: 'Revire Gitmeli',
+  hastaneye_gitmeli: 'Hastaneye Gitmeli',
+  takip_gereken: 'Takip Gereken'
+};
+const PERIODIC_STATUS_COLORS = {
+  tamamlandi: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300',
+  gecikti: 'bg-brick-500/10 text-brick-600 dark:text-brick-500',
+  yaklasiyor: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
+  revire_gitmeli: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  hastaneye_gitmeli: 'bg-purple-500/10 text-purple-600 dark:text-purple-400',
+  takip_gereken: 'bg-slate-500/10 text-slate-600 dark:text-slate-400'
+};
+const PERIODIC_STATUS_ICONS = {
+  tamamlandi: 'check-circle-2',
+  gecikti: 'x-circle',
+  yaklasiyor: 'alert-triangle',
+  revire_gitmeli: 'heart',
+  hastaneye_gitmeli: 'shield',
+  takip_gereken: 'clock'
+};
+
+function daysFromToday(dateStr) {
+  if (!dateStr) return null;
+  const target = new Date(dateStr + 'T00:00:00');
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((target - today) / 86400000);
+}
+function fmtDaysDiff(dateStr) {
+  const d = daysFromToday(dateStr);
+  if (d === null || isNaN(d)) return '';
+  if (d > 0) return `${d} gün kaldı`;
+  if (d < 0) return `${Math.abs(d)} gün gecikti`;
+  return 'Bugün';
+}
+
+function icons() { if (window.lucide) lucide.createIcons(); }
+
+function applyTheme() {
+  const stored = localStorage.getItem('theme');
+  const dark = stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+  document.documentElement.classList.toggle('dark', dark);
+}
+function toggleTheme() {
+  const isDark = document.documentElement.classList.toggle('dark');
+  localStorage.setItem('theme', isDark ? 'dark' : 'light');
+}
+
+/* =====================================================================
+   VERİ ERİŞİMİ
+   ===================================================================== */
+async function fetchProfile(userId) {
+  try {
+    const doc = await db.collection('profiles').doc(userId).get();
+    if (!doc.exists) return null;
+    return normalizeProfile(doc.id, doc.data());
+  } catch (err) {
+    console.error('Profil alınamadı:', err.message);
+    return null;
+  }
+}
+
+// Sicil numarasından (arka planda tutulan) e-postayı bulur.
+async function resolveEmailFromRegistryNumber(registryNumber) {
+  try {
+    const doc = await db.collection('registryLookup').doc(registryNumber.trim()).get();
+    if (!doc.exists) return null;
+    return doc.data().email;
+  } catch {
+    return null;
+  }
+}
+
+async function loadEmployees() {
+  try {
+    const snap = await db.collection('profiles').where('role', '==', 'employee').get();
+    state.employees = snap.docs
+      .map(d => normalizeProfile(d.id, d.data()))
+      .sort((a, b) => (a.first_name || '').localeCompare(b.first_name || ''));
+    return true;
+  } catch (err) {
+    console.error('Çalışanlar alınamadı:', err.message);
+    return false;
+  }
+}
+
+async function loadAnnouncements() {
+  try {
+    const snap = await db.collection('announcements').orderBy('publishedAt', 'desc').get();
+    state.announcements = snap.docs.map(d => normalizeAnnouncement(d.id, d.data()));
+    return true;
+  } catch (err) {
+    console.error('Duyurular alınamadı:', err.message);
+    return false;
+  }
+}
+
+/* =====================================================================
+   ROUTER + RENDER
+   ===================================================================== */
+function currentRoute() { return location.hash || '#/login'; }
+
+async function render() {
+  const app = document.getElementById('app');
+  const route = currentRoute();
+
+  if (state.loading) {
+    app.innerHTML = loadingScreen();
+    return;
+  }
+
+  if (!state.session) {
+    app.innerHTML = loginScreen();
+    icons();
+    return;
+  }
+
+  if (!state.profile) {
+    app.innerHTML = loadingScreen('Profil yükleniyor…');
+    return;
+  }
+
+  const role = state.profile.role;
+  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks'];
+
+  if (adminRoutes.includes(route) && role !== 'admin') {
+    location.hash = '#/dashboard';
+    return;
+  }
+  if ((route === '#/login' || route === '' || route === '#/') ) {
+    location.hash = role === 'admin' ? '#/admin' : '#/dashboard';
+    return;
+  }
+
+  let content = '';
+  let title = '';
+  let subtitle = '';
+
+  if (route === '#/dashboard') {
+    title = `Merhaba, ${escapeHtml(state.profile.first_name)} 👋`;
+    subtitle = `${escapeHtml(state.profile.department)} · Sicil No: ${escapeHtml(state.profile.registry_number || '—')}`;
+    await Promise.all([loadAnnouncements(), loadMyPeriodicChecks(state.profile.id)]);
+    content = employeeDashboardView();
+  } else if (route === '#/admin') {
+    title = 'Genel Bakış';
+    subtitle = 'Yönetici Paneli';
+    await Promise.all([loadEmployees(), loadAnnouncements()]);
+    content = adminDashboardView();
+  } else if (route === '#/admin/employees') {
+    title = 'Çalışanlar';
+    await loadEmployees();
+    subtitle = `${state.employees.length} kayıtlı çalışan`;
+    content = adminEmployeesView();
+  } else if (route === '#/admin/import') {
+    title = 'Toplu Ekleme';
+    subtitle = 'Excel veya CSV dosyasından çalışan aktarın';
+    content = adminImportView();
+  } else if (route === '#/report') {
+    title = 'Öneri / Ramak Kala Bildir';
+    subtitle = 'Bir öneriniz veya ramak kala olayınız mı var?';
+    await loadMyReports(state.profile.id);
+    content = employeeReportView();
+  } else if (route === '#/admin/announcements') {
+    title = 'Duyurular';
+    await loadAnnouncements();
+    subtitle = `${state.announcements.length} duyuru yayında`;
+    content = adminAnnouncementsView();
+  } else if (route === '#/admin/reports') {
+    title = 'Bildirimler';
+    await loadAllReports();
+    subtitle = `${state.allReports.length} bildirim`;
+    content = adminReportsView();
+  } else if (route === '#/admin/periodic-checks') {
+    title = 'Periyodik Kontroller';
+    await Promise.all([loadEmployees(), loadAllPeriodicChecks()]);
+    subtitle = `${state.periodicChecks.length} kayıtlı kontrol`;
+    content = adminPeriodicChecksView();
+  } else {
+    location.hash = role === 'admin' ? '#/admin' : '#/dashboard';
+    return;
+  }
+
+  app.innerHTML = shell(title, subtitle, content, role, route);
+  icons();
+}
+
+function loadingScreen(msg) {
+  return `
+  <div class="flex h-screen items-center justify-center bg-sand-50 dark:bg-ink-900">
+    <div class="flex flex-col items-center gap-3">
+      <div class="h-8 w-8 animate-spin rounded-full border-2 border-pine-600 border-t-transparent"></div>
+      <p class="text-sm text-ink-800/60 dark:text-sand-100/60">${escapeHtml(msg || 'Yükleniyor…')}</p>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   KABUK (Sidebar + Topbar + içerik)
+   ===================================================================== */
+function shell(title, subtitle, content, role, route) {
+  const employeeLinks = [
+    { href: '#/dashboard', label: 'Panelim', icon: 'layout-dashboard' },
+    { href: '#/report', label: 'Öneri / Ramak Kala', icon: 'alert-triangle' }
+  ];
+  const adminLinks = [
+    { href: '#/admin', label: 'Genel Bakış', icon: 'layout-dashboard' },
+    { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
+    { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
+    { href: '#/admin/announcements', label: 'Duyurular', icon: 'megaphone' },
+    { href: '#/admin/reports', label: 'Bildirimler', icon: 'alert-triangle' },
+    { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' }
+  ];
+  const links = role === 'admin' ? adminLinks : employeeLinks;
+  const p = state.profile;
+
+  const navHtml = links.map(l => `
+    <a href="${l.href}" data-action="nav-link"
+       class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+         route === l.href ? 'bg-white/10 text-white' : 'text-sand-100/70 hover:bg-white/5 hover:text-white'
+       }">
+      <i data-lucide="${l.icon}" class="w-[18px] h-[18px]"></i>
+      ${l.label}
+    </a>`).join('');
+
+  return `
+  <div class="flex min-h-screen bg-sand-50 dark:bg-ink-900">
+    ${state.sidebarOpen ? `<div class="fixed inset-0 z-30 bg-black/30 lg:hidden" data-action="close-sidebar"></div>` : ''}
+    <aside class="fixed z-40 inset-y-0 left-0 w-64 shrink-0 transform bg-pine-900 text-sand-100 transition-transform duration-200 lg:static lg:translate-x-0 ${state.sidebarOpen ? 'translate-x-0' : '-translate-x-full'}">
+      <div class="flex h-16 items-center justify-between px-5 border-b border-white/10">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-gold-500 text-pine-950"><i data-lucide="user-round" class="w-[18px] h-[18px]"></i></div>
+          <span class="font-display font-semibold text-[15px] tracking-tight">İzin Portalı</span>
+        </div>
+        <button class="lg:hidden text-sand-100/70" data-action="close-sidebar" aria-label="Kapat">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <nav class="flex flex-col gap-1 px-3 py-5">${navHtml}</nav>
+      <div class="absolute bottom-0 left-0 right-0 border-t border-white/10 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-9 w-9 items-center justify-center rounded-full bg-gold-500/90 text-pine-950 text-sm font-semibold">
+            ${escapeHtml((p.first_name||' ')[0])}${escapeHtml((p.last_name||' ')[0])}
+          </div>
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-white">${escapeHtml(p.first_name)} ${escapeHtml(p.last_name)}</p>
+            <p class="flex items-center gap-1 truncate text-xs text-sand-100/60">
+              <i data-lucide="building-2" class="w-[11px] h-[11px]"></i> ${escapeHtml(p.department)}
+            </p>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-black/5 dark:border-white/5 bg-sand-50/90 dark:bg-ink-900/90 backdrop-blur px-4 sm:px-6">
+        <div class="flex items-center gap-3 min-w-0">
+          <button class="lg:hidden text-ink-800 dark:text-sand-100" data-action="open-sidebar" aria-label="Menüyü aç">
+            <i data-lucide="menu" class="w-[22px] h-[22px]"></i>
+          </button>
+          <div class="min-w-0">
+            <h1 class="truncate font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${title}</h1>
+            ${subtitle ? `<p class="truncate text-xs text-ink-800/55 dark:text-sand-100/50">${subtitle}</p>` : ''}
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button data-action="toggle-theme" aria-label="Temayı değiştir"
+            class="flex h-9 w-9 items-center justify-center rounded-lg border border-black/10 dark:border-white/10 text-ink-800 dark:text-sand-100 hover:bg-sand-100 dark:hover:bg-ink-700 transition-colors">
+            <i data-lucide="sun-moon" class="w-[17px] h-[17px]"></i>
+          </button>
+          <button data-action="logout"
+            class="flex items-center gap-2 rounded-lg border border-black/10 dark:border-white/10 px-3 py-2 text-sm font-medium text-ink-800 dark:text-sand-100 hover:bg-sand-100 dark:hover:bg-ink-700 transition-colors">
+            <i data-lucide="log-out" class="w-4 h-4"></i>
+            <span class="hidden sm:inline">Çıkış</span>
+          </button>
+        </div>
+      </header>
+      <main class="flex-1 px-4 py-6 sm:px-6 lg:px-8">${content}</main>
+    </div>
+  </div>
+  ${modalHtml()}`;
+}
+
+/* =====================================================================
+   GİRİŞ EKRANI
+   ===================================================================== */
+function loginScreen() {
+  return `
+  <div class="flex min-h-screen items-center justify-center bg-sand-50 dark:bg-ink-900 px-4">
+    <div class="grid w-full max-w-4xl overflow-hidden rounded-xl2 shadow-soft lg:grid-cols-2">
+      <div class="hidden flex-col justify-between bg-pine-900 p-10 text-sand-100 lg:flex">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gold-500 text-pine-950"><i data-lucide="user-round" class="w-5 h-5"></i></div>
+          <span class="font-display font-semibold tracking-tight">İzin Portalı</span>
+        </div>
+        <div>
+          <h2 class="font-display text-3xl font-bold leading-tight text-white">
+            İzinlerinizi ve şirket duyurularını<br /> tek bir yerden takip edin.
+          </h2>
+          <p class="mt-4 max-w-sm text-sm text-sand-100/70">
+            Yıllık izin bakiyenizi görün, esnek çalışma saatlerinizi kontrol edin ve güncel duyurulardan haberdar olun.
+          </p>
+        </div>
+        <p class="text-xs text-sand-100/40">© ${new Date().getFullYear()} Şirket Adı</p>
+      </div>
+
+      <div class="bg-white dark:bg-ink-800 p-8 sm:p-10">
+        <h1 class="font-display text-2xl font-bold text-ink-900 dark:text-sand-50">Giriş Yap</h1>
+        <p class="mt-1.5 text-sm text-ink-800/55 dark:text-sand-100/50">Hesabınıza erişmek için bilgilerinizi girin.</p>
+
+        <form id="login-form" class="mt-7 space-y-4">
+          <div>
+            <label class="label" for="login-registry">Sicil No</label>
+            <div class="relative">
+              <i data-lucide="badge-check" class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-800/35 dark:text-sand-100/35"></i>
+              <input id="login-registry" type="text" required autocomplete="username" placeholder="Örn. 1024"
+                class="input pl-10 w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
+            </div>
+          </div>
+          <div>
+            <label class="label" for="login-password">Şifre</label>
+            <div class="relative">
+              <i data-lucide="lock" class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-800/35 dark:text-sand-100/35"></i>
+              <input id="login-password" type="password" required autocomplete="current-password" placeholder="••••••••"
+                class="input pl-10 w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
+            </div>
+          </div>
+          <div id="login-error"></div>
+          <button type="submit" id="login-submit" class="btn-primary w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+            Giriş Yap
+          </button>
+        </form>
+        <p class="mt-6 text-center text-xs text-ink-800/45 dark:text-sand-100/40">
+          Hesap bilgileriniz yoksa lütfen Yazıcınız ile iletişime geçin.
+        </p>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   ÇALIŞAN PANELİ
+   ===================================================================== */
+function employeeDashboardView() {
+  const p = state.profile;
+  const remaining = Math.max(p.annual_leave_total - p.annual_leave_used, 0);
+  const pct = p.annual_leave_total > 0 ? Math.min(p.annual_leave_used / p.annual_leave_total, 1) : 0;
+  const r = 60, circumference = 2 * Math.PI * r, offset = circumference * (1 - pct);
+  const anns = state.announcements.slice(0, 10);
+
+  return `
+  <div class="grid gap-5 lg:grid-cols-3">
+    <div class="card p-6 lg:col-span-1 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yıllık İzin Durumu</h2>
+      <div class="mt-5 flex items-center gap-6">
+        <div class="relative h-36 w-36 shrink-0">
+          <svg viewBox="0 0 140 140" class="h-full w-full -rotate-90">
+            <circle cx="70" cy="70" r="${r}" fill="none" stroke-width="12" class="stroke-sand-200 dark:stroke-ink-700" />
+            <circle cx="70" cy="70" r="${r}" fill="none" stroke-width="12" stroke-linecap="round"
+              stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"
+              class="stroke-gold-500 transition-all duration-700 ease-out" />
+          </svg>
+          <div class="absolute inset-0 flex flex-col items-center justify-center">
+            <span class="font-display text-3xl font-bold text-pine-700 dark:text-gold-400">${remaining}</span>
+            <span class="text-xs text-ink-800/55 dark:text-sand-100/50">gün kaldı</span>
+          </div>
+        </div>
+        <dl class="space-y-3 text-sm">
+          <div class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-gold-500"></span><dt class="text-ink-800/60 dark:text-sand-100/55">Kullanılan</dt><dd class="font-semibold">${p.annual_leave_used} gün</dd></div>
+          <div class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-sand-200 dark:bg-ink-700"></span><dt class="text-ink-800/60 dark:text-sand-100/55">Kalan</dt><dd class="font-semibold">${remaining} gün</dd></div>
+          <div class="flex items-center gap-2"><span class="h-2.5 w-2.5 rounded-full bg-pine-600"></span><dt class="text-ink-800/60 dark:text-sand-100/55">Toplam Hak</dt><dd class="font-semibold">${p.annual_leave_total} gün</dd></div>
+        </dl>
+      </div>
+    </div>
+
+    <div class="space-y-5 lg:col-span-2">
+      <div class="grid gap-4 sm:grid-cols-3">
+        ${statCard('palmtree', 'Kalan İzin', remaining + ' gün', '', 'gold')}
+        ${statCard('calendar-clock', 'Kullanılan İzin', p.annual_leave_used + ' gün', '', 'pine')}
+        ${statCard('megaphone', 'Güncel Duyuru', anns.length, 'son 10 duyuru', 'brick')}
+      </div>
+
+      <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
+            <i data-lucide="clock" class="w-[18px] h-[18px]"></i>
+          </div>
+          <div>
+            <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Çalışma Saatleri</h2>
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Size tanımlanmış mesai aralığı</p>
+          </div>
+        </div>
+        <div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
+          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Başlangıç</p>
+            <p class="mt-1 font-display text-xl font-bold text-pine-700 dark:text-gold-400">${timeShort(p.flexible_hours_start)}</p>
+          </div>
+          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Bitiş</p>
+            <p class="mt-1 font-display text-xl font-bold text-pine-700 dark:text-gold-400">${timeShort(p.flexible_hours_end)}</p>
+          </div>
+          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Saat Bakiyesi</p>
+            <p class="mt-1 font-display text-xl font-bold ${p.flex_time_balance < 0 ? 'text-brick-500' : 'text-pine-700 dark:text-gold-400'}">${fmtHours(p.flex_time_balance)}</p>
+          </div>
+          <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Kesilen Saat Bakiyesi</p>
+            <p class="mt-1 font-display text-xl font-bold text-pine-700 dark:text-gold-400">${fmtHours(p.deducted_hours_balance)}</p>
+          </div>
+          <div class="col-span-2 rounded-lg bg-sand-50 dark:bg-ink-900 p-4 sm:col-span-1">
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Not</p>
+            <p class="mt-1 text-sm font-medium">${escapeHtml(p.flexible_work_note || 'Standart mesai')}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  ${state.myPeriodicChecks.length > 0 ? `
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
+        <i data-lucide="stethoscope" class="w-[18px] h-[18px]"></i>
+      </div>
+      <div>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Periyodik Sağlık Kontrollerim</h2>
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Yönetici tarafından takip edilen kontrol tarihleriniz</p>
+      </div>
+    </div>
+    <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+      ${state.myPeriodicChecks.map(c => `
+        <div class="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div class="min-w-0">
+            <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</p>
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(c.due_date)}</p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="text-xs text-ink-800/55 dark:text-sand-100/50 whitespace-nowrap">${fmtDaysDiff(c.due_date)}</span>
+            <span class="rounded-full px-2.5 py-1 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+          </div>
+        </div>`).join('')}
+    </div>
+  </div>` : ''}
+
+  <div class="mt-8">
+    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Şirket Duyuruları</h2>
+    ${anns.length === 0
+      ? `<div class="card p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">Henüz bir duyuru yok.</div>`
+      : `<div class="space-y-4">${anns.map(a => announcementCard(a, false)).join('')}</div>`}
+  </div>`;
+}
+
+function statCard(icon, label, value, hint, accent) {
+  const accents = {
+    pine: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300',
+    gold: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
+    brick: 'bg-brick-500/10 text-brick-600 dark:text-brick-500'
+  };
+  return `
+  <div class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-start justify-between">
+      <div>
+        <p class="text-xs font-medium text-ink-800/55 dark:text-sand-100/50">${label}</p>
+        <p class="mt-1.5 font-display text-2xl font-bold text-ink-900 dark:text-sand-50">${value}</p>
+        ${hint ? `<p class="mt-1 text-xs text-ink-800/45 dark:text-sand-100/40">${hint}</p>` : ''}
+      </div>
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg ${accents[accent]}">
+        <i data-lucide="${icon}" class="w-[18px] h-[18px]"></i>
+      </div>
+    </div>
+  </div>`;
+}
+
+function leaveBar(total, used, compact) {
+  const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0;
+  return `
+  <div class="${compact ? 'w-32' : 'w-full'}">
+    <div class="h-2 w-full overflow-hidden rounded-full bg-sand-200 dark:bg-ink-700">
+      <div class="h-full rounded-full bg-gold-500 transition-all duration-500" style="width:${pct}%"></div>
+    </div>
+    ${!compact ? `<p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">${used} / ${total} gün kullanıldı</p>` : ''}
+  </div>`;
+}
+
+function announcementCard(a, editable) {
+  return `
+  <article class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
+          <i data-lucide="megaphone" class="w-4 h-4"></i>
+        </div>
+        <div class="min-w-0">
+          <h3 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(a.title)}</h3>
+          <p class="mt-0.5 text-xs text-ink-800/50 dark:text-sand-100/45">${fmtDate(a.published_at)}</p>
+        </div>
+      </div>
+      ${editable ? `
+      <div class="flex shrink-0 gap-1">
+        <button data-action="edit-announcement" data-id="${a.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
+          <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
+        </button>
+        <button data-action="delete-announcement" data-id="${a.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+          <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+        </button>
+      </div>` : ''}
+    </div>
+    <p class="mt-3 whitespace-pre-line text-sm leading-relaxed text-ink-800/80 dark:text-sand-100/75">${escapeHtml(a.content)}</p>
+  </article>`;
+}
+
+/* =====================================================================
+   ÇALIŞAN — ÖNERİ / RAMAK KALA BİLDİRİMİ
+   ===================================================================== */
+function employeeReportView() {
+  const p = state.profile;
+  const myReports = state.myReports;
+
+  return `
+  <div class="grid gap-5 lg:grid-cols-3">
+    <div class="card p-6 lg:col-span-2 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yeni Bildirim</h2>
+      <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Bir öneriniz veya fark ettiğiniz bir ramak kala (near-miss) olayı varsa bildirin.</p>
+
+      <form id="report-form" class="mt-5 space-y-4">
+        <div>
+          <label class="label">Bildirim Türü</label>
+          <select name="type" required class="input">
+            <option value="oneri">Öneri</option>
+            <option value="ramak_kala">Ramak Kala</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Risk Seviyesi</label>
+            <select name="risk_level" required class="input">
+              <option value="dusuk">Düşük</option>
+              <option value="orta" selected>Orta</option>
+              <option value="yuksek">Yüksek</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Tarih</label>
+            <input name="date" type="date" required class="input" value="${new Date().toISOString().slice(0, 10)}" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Vardiya</label>
+            <select name="shift" required class="input">
+              <option value="Sabah">Sabah</option>
+              <option value="Akşam">Akşam</option>
+              <option value="Gece">Gece</option>
+              <option value="Diğer">Diğer</option>
+            </select>
+          </div>
+          <div>
+            <label class="label">Bölüm / Kısım</label>
+            <input name="department" required class="input" value="${escapeHtml(p.department || '')}" />
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Açıklama</label>
+          <textarea name="description" required rows="4" class="input resize-none" placeholder="Ne oldu, nerede oldu, neden risk oluşturuyor?"></textarea>
+        </div>
+
+        <div>
+          <label class="label">Fotoğraf (opsiyonel)</label>
+          <input id="report-photo-input" type="file" accept="image/*" capture="environment" class="input" />
+          <div id="report-photo-preview">${state.reportPhotoData
+            ? `<img src="${state.reportPhotoData}" class="mt-2 max-h-40 rounded-lg border border-black/10 dark:border-white/10" />`
+            : ''}</div>
+        </div>
+
+        ${state.reportFormError ? `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(state.reportFormError)}</p>` : ''}
+
+        <button type="submit" ${state.reportSubmitting ? 'disabled' : ''} class="btn-primary w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700 disabled:opacity-50">
+          ${state.reportSubmitting ? 'Gönderiliyor…' : 'Bildirimi Gönder'}
+        </button>
+      </form>
+    </div>
+
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
+        <i data-lucide="info" class="w-[18px] h-[18px]"></i>
+      </div>
+      <h3 class="mt-3 font-display text-sm font-semibold text-ink-900 dark:text-sand-50">Neden önemli?</h3>
+      <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
+        Ramak kala bildirimleri, henüz bir kazaya dönüşmemiş riskli durumları erken tespit etmemizi sağlar.
+        Önerileriniz de çalışma ortamını iyileştirmemize yardımcı olur. Bildiriminiz sadece yöneticiler tarafından görüntülenir.
+      </p>
+    </div>
+  </div>
+
+  <div class="mt-8">
+    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Bildirimlerim</h2>
+    ${myReports.length === 0
+      ? `<div class="card p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">Henüz bir bildiriminiz yok.</div>`
+      : `<div class="space-y-4">${myReports.map(r => reportCard(r, false)).join('')}</div>`}
+  </div>`;
+}
+
+function reportCard(r, forAdmin) {
+  return `
+  <article class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex items-start gap-3 min-w-0">
+        <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${RISK_COLORS[r.risk_level] || RISK_COLORS.orta}">
+          <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+        </div>
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">${REPORT_TYPE_LABELS[r.type] || r.type}</h3>
+            <span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${RISK_COLORS[r.risk_level] || RISK_COLORS.orta}">Risk: ${RISK_LABELS[r.risk_level] || r.risk_level}</span>
+            <span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[r.status] || STATUS_COLORS.yeni}">${STATUS_LABELS[r.status] || r.status}</span>
+          </div>
+          <p class="mt-0.5 text-xs text-ink-800/50 dark:text-sand-100/45">
+            ${escapeHtml(r.date || '')} · ${escapeHtml(r.shift || '')} · ${escapeHtml(r.department || '')}
+            ${forAdmin && r.submitter_name ? ` · ${escapeHtml(r.submitter_name)}` : ''}
+          </p>
+        </div>
+      </div>
+      ${forAdmin ? `
+      <div class="flex shrink-0 items-center gap-2">
+        <select data-action="change-report-status" data-id="${r.id}" class="rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2.5 py-1.5 text-xs">
+          <option value="yeni" ${r.status === 'yeni' ? 'selected' : ''}>Yeni</option>
+          <option value="inceleniyor" ${r.status === 'inceleniyor' ? 'selected' : ''}>İnceleniyor</option>
+          <option value="kapatildi" ${r.status === 'kapatildi' ? 'selected' : ''}>Kapatıldı</option>
+        </select>
+        <button data-action="delete-report" data-id="${r.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+          <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+        </button>
+      </div>` : ''}
+    </div>
+    <p class="mt-3 whitespace-pre-line text-sm leading-relaxed text-ink-800/80 dark:text-sand-100/75">${escapeHtml(r.description)}</p>
+    ${r.photo ? `<img src="${r.photo}" class="mt-3 max-h-56 rounded-lg border border-black/10 dark:border-white/10" />` : ''}
+  </article>`;
+}
+
+/* =====================================================================
+   ADMIN — BİLDİRİMLER
+   ===================================================================== */
+function adminReportsView() {
+  const filter = state.adminReportFilter;
+  const filtered = filter === 'hepsi' ? state.allReports : state.allReports.filter(r => r.type === filter);
+
+  const filterBtn = (value, label) => `
+    <button data-action="filter-reports" data-value="${value}"
+      class="rounded-lg px-3.5 py-2 text-xs font-medium transition-colors ${
+        filter === value
+          ? 'bg-pine-600 text-white'
+          : 'bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100'
+      }">${label}</button>`;
+
+  return `
+  <div class="mb-5 flex flex-wrap gap-2">
+    ${filterBtn('hepsi', 'Hepsi')}
+    ${filterBtn('oneri', 'Öneriler')}
+    ${filterBtn('ramak_kala', 'Ramak Kala')}
+  </div>
+  ${filtered.length === 0
+    ? `<div class="card p-10 text-center text-sm text-ink-800/50 dark:text-sand-100/45 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">Bu filtrede bildirim yok.</div>`
+    : `<div class="space-y-4">${filtered.map(r => reportCard(r, true)).join('')}</div>`}`;
+}
+
+/* =====================================================================
+   ADMIN — PERİYODİK KONTROLLER
+   ===================================================================== */
+function adminPeriodicChecksView() {
+  const checks = state.periodicChecks;
+  const counts = {
+    total: checks.length,
+    tamamlandi: checks.filter(c => c.status === 'tamamlandi').length,
+    yaklasiyor: checks.filter(c => c.status === 'yaklasiyor').length,
+    gecikti: checks.filter(c => c.status === 'gecikti').length,
+    revire_gitmeli: checks.filter(c => c.status === 'revire_gitmeli').length,
+    hastaneye_gitmeli: checks.filter(c => c.status === 'hastaneye_gitmeli').length,
+    takip_gereken: checks.filter(c => c.status === 'takip_gereken').length
+  };
+  const needsAttention = checks.filter(c => c.status !== 'tamamlandi');
+
+  const summaryCard = (icon, label, value, accent) => `
+    <div class="card p-4 text-center bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <p class="text-xs font-medium text-ink-800/55 dark:text-sand-100/50 flex items-center justify-center gap-1.5">
+        ${label} <i data-lucide="${icon}" class="w-3.5 h-3.5 opacity-70"></i>
+      </p>
+      <p class="mt-2 font-display text-2xl font-bold text-ink-900 dark:text-sand-50">${value}</p>
+    </div>`;
+
+  return `
+  <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+    ${summaryCard('clipboard-list', 'Toplam Kontrol', counts.total)}
+    ${summaryCard('check-circle-2', 'Tamamlanan', counts.tamamlandi)}
+    ${summaryCard('alert-triangle', 'Yaklaşan', counts.yaklasiyor)}
+    ${summaryCard('x-circle', 'Geciken', counts.gecikti)}
+    ${summaryCard('heart', 'Revire Gitmesi Gereken', counts.revire_gitmeli)}
+    ${summaryCard('shield', 'Hastaneye Gitmesi Gereken', counts.hastaneye_gitmeli)}
+    ${summaryCard('clock', 'Takip Gereken', counts.takip_gereken)}
+  </div>
+
+  <div class="mb-5 flex justify-end">
+    <button data-action="open-periodic-check-form" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+      <i data-lucide="plus" class="w-4 h-4"></i> Yeni Kontrol Ekle
+    </button>
+  </div>
+
+  <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Periyodik Kontroller</h2>
+    ${needsAttention.length === 0
+      ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Dikkat gereken bir kontrol yok.</p>`
+      : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+          ${needsAttention.map(c => periodicCheckRow(c)).join('')}
+        </div>`}
+  </div>
+
+  <div class="mt-8 card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="px-6 pt-6"><h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Tüm Kontroller</h2></div>
+    ${checks.length === 0
+      ? `<p class="p-6 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz kontrol eklenmedi.</p>`
+      : `<table class="mt-4 w-full min-w-[720px] text-left text-sm">
+          <thead><tr class="border-b border-black/5 dark:border-white/5 text-xs text-ink-800/45 dark:text-sand-100/40">
+            <th class="px-6 py-3 font-medium">Çalışan</th>
+            <th class="px-3 py-3 font-medium">Kontrol Türü</th>
+            <th class="px-3 py-3 font-medium">Tarih</th>
+            <th class="px-3 py-3 font-medium">Durum</th>
+            <th class="px-3 py-3 font-medium text-right pr-6">İşlemler</th>
+          </tr></thead>
+          <tbody class="divide-y divide-black/5 dark:divide-white/5">
+            ${checks.map(c => `<tr>
+              <td class="px-6 py-3">
+                <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(c.employee_name)}</p>
+                <p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(c.department || '')}</p>
+              </td>
+              <td class="px-3 py-3 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</td>
+              <td class="px-3 py-3 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${escapeHtml(c.due_date)} <span class="text-xs text-ink-800/40 dark:text-sand-100/35">(${fmtDaysDiff(c.due_date)})</span></td>
+              <td class="px-3 py-3"><span class="rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span></td>
+              <td class="px-3 py-3 pr-6">
+                <div class="flex justify-end gap-1">
+                  <button data-action="edit-periodic-check" data-id="${c.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
+                    <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
+                  </button>
+                  <button data-action="delete-periodic-check" data-id="${c.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+                    <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+                  </button>
+                </div>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`}
+  </div>`;
+}
+
+function periodicCheckRow(c) {
+  return `
+  <div class="flex flex-wrap items-center justify-between gap-3 py-3.5">
+    <div class="min-w-0">
+      <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(c.employee_name)} <span class="font-normal text-ink-800/45 dark:text-sand-100/40">· ${escapeHtml(c.department || '')}</span></p>
+      <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)} · ${escapeHtml(c.due_date)}</p>
+    </div>
+    <div class="flex shrink-0 items-center gap-2">
+      <span class="text-xs text-ink-800/55 dark:text-sand-100/50 whitespace-nowrap">${fmtDaysDiff(c.due_date)}</span>
+      <span class="flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">
+        <i data-lucide="${PERIODIC_STATUS_ICONS[c.status]}" class="w-3 h-3"></i>
+        ${PERIODIC_STATUS_LABELS[c.status]}
+      </span>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — GENEL BAKIŞ
+   ===================================================================== */
+function adminDashboardView() {
+  const employees = state.employees;
+  const total = employees.length;
+  const avgUsage = total > 0
+    ? Math.round((employees.reduce((s, e) => s + (e.annual_leave_used / (e.annual_leave_total || 1)), 0) / total) * 100)
+    : 0;
+  const departments = new Set(employees.map(e => e.department)).size;
+
+  const deptCounts = {};
+  employees.forEach(e => {
+    const d = e.department || 'Belirtilmemiş';
+    deptCounts[d] = (deptCounts[d] || 0) + 1;
+  });
+  const deptEntries = Object.entries(deptCounts).sort((a, b) => b[1] - a[1]);
+  const deptAccentOrder = ['pine', 'gold', 'brick'];
+
+  const rows = employees.map(e => `
+    <tr>
+      <td class="py-3 pr-3 font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</td>
+      <td class="py-3 pr-3 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
+      <td class="py-3 pr-3 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} / ${e.annual_leave_total} gün</td>
+      <td class="py-3">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
+    </tr>`).join('');
+
+  return `
+  <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    ${statCard('users', 'Toplam Çalışan', total, '', 'pine')}
+    ${statCard('palmtree', 'Ort. İzin Kullanım Oranı', '%' + avgUsage, '', 'gold')}
+    ${statCard('megaphone', 'Toplam Duyuru', state.announcements.length, '', 'brick')}
+    ${statCard('trending-up', 'Departman Sayısı', departments, '', 'pine')}
+  </div>
+
+  ${deptEntries.length > 0 ? `
+  <div class="mt-8">
+    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Departmanlara Göre Çalışan Sayısı</h2>
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      ${deptEntries.map(([name, count], i) =>
+        statCard('users', name, count, `toplam ${total} çalışanın ${Math.round((count / total) * 100)}%'i`, deptAccentOrder[i % 3])
+      ).join('')}
+    </div>
+  </div>` : ''}
+
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-center justify-between">
+      <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Çalışanlar — İzin ve Esnek Saat Durumu</h2>
+      <a href="#/admin/employees" class="flex items-center gap-1 text-sm font-medium text-pine-700 dark:text-gold-400 hover:underline">
+        Tümünü Yönet <i data-lucide="arrow-right" class="w-[14px] h-[14px]"></i>
+      </a>
+    </div>
+    ${employees.length === 0
+      ? `<p class="mt-6 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz çalışan eklenmedi. "Çalışanlar" sayfasından ekleyebilirsiniz.</p>`
+      : `<div class="mt-5 max-h-[420px] overflow-auto">
+          <table class="w-full min-w-[640px] text-left text-sm">
+            <thead class="sticky top-0 bg-white dark:bg-ink-800"><tr class="text-xs text-ink-800/45 dark:text-sand-100/40">
+              <th class="pb-3 pr-3 font-medium">Ad Soyad</th>
+              <th class="pb-3 pr-3 font-medium">Departman</th>
+              <th class="pb-3 pr-3 font-medium">Kalan / Toplam İzin</th>
+              <th class="pb-3 font-medium">Kullanım</th>
+            </tr></thead>
+            <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
+          </table>
+        </div>`}
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — ÇALIŞANLAR
+   ===================================================================== */
+function adminEmployeesView() {
+  const q = (state.employeeSearch || '').trim().toLowerCase();
+  const filtered = !q ? state.employees : state.employees.filter(e =>
+    `${e.first_name} ${e.last_name} ${e.registry_number} ${e.department}`.toLowerCase().includes(q));
+
+  const rows = filtered.map(e => `
+    <tr>
+      <td class="px-5 py-3.5">
+        <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+        <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
+      </td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${timeShort(e.flexible_hours_start)} – ${timeShort(e.flexible_hours_end)}</td>
+      <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
+      <td class="px-5 py-3.5">
+        <div class="flex justify-end gap-1">
+          <button data-action="edit-employee" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
+            <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
+          </button>
+          <button data-action="delete-employee" data-id="${e.id}" data-name="${escapeHtml(e.first_name + ' ' + e.last_name)}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+            <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  return `
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div class="relative w-full sm:max-w-xs">
+      <i data-lucide="search" class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-800/35 dark:text-sand-100/35"></i>
+      <input id="employee-search" value="${escapeHtml(state.employeeSearch || '')}" placeholder="İsim, sicil no veya departman ara…"
+        class="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 pl-10 pr-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
+    </div>
+    <button data-action="open-employee-form" class="btn-primary shrink-0 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+      <i data-lucide="plus" class="w-4 h-4"></i> Yeni Çalışan
+    </button>
+  </div>
+
+  <div class="card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    ${filtered.length === 0
+      ? `<p class="p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45">Kayıt bulunamadı.</p>`
+      : `<table class="w-full min-w-[720px] text-left text-sm">
+          <thead><tr class="border-b border-black/5 dark:border-white/5 text-xs text-ink-800/45 dark:text-sand-100/40">
+            <th class="px-5 py-3.5 font-medium">Ad Soyad</th>
+            <th class="px-5 py-3.5 font-medium">Departman</th>
+            <th class="px-5 py-3.5 font-medium">Esnek Saat</th>
+            <th class="px-5 py-3.5 font-medium">İzin Kullanımı</th>
+            <th class="px-5 py-3.5 font-medium text-right">İşlemler</th>
+          </tr></thead>
+          <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
+        </table>`}
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — TOPLU EKLEME
+   ===================================================================== */
+const COLUMN_MAP = {
+  registry_number: ['registry_number', 'sicil_no', 'sicil no', 'sicil', 'sicil numarasi'],
+  first_name: ['first_name', 'ad', 'isim'],
+  last_name: ['last_name', 'soyad'],
+  department: ['department', 'departman'],
+  annual_leave_total: ['annual_leave_total', 'yillik_izin', 'yillik izin hakki', 'izin_hakki'],
+  flexible_hours_start: ['flexible_hours_start', 'mesai_baslangic', 'baslangic'],
+  flexible_hours_end: ['flexible_hours_end', 'mesai_bitis', 'bitis'],
+  password: ['password', 'sifre', 'şifre']
+};
+function normalizeKey(key) {
+  return String(key).trim().toLowerCase()
+    .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c');
+}
+function mapRow(rawRow) {
+  const normalized = {};
+  for (const [k, v] of Object.entries(rawRow)) normalized[normalizeKey(k)] = v;
+  const mapped = {};
+  for (const [field, aliases] of Object.entries(COLUMN_MAP)) {
+    const foundKey = aliases.map(normalizeKey).find(a => a in normalized);
+    if (foundKey) mapped[field] = normalized[foundKey];
+  }
+  return mapped;
+}
+
+function adminImportView() {
+  const rows = state.bulkRows;
+
+  const table = `
+    <div class="mt-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <p class="text-sm font-medium text-ink-900 dark:text-sand-50">
+          ${rows.length > 0 ? `${rows.length} satır — düzenleyebilirsiniz` : 'Henüz satır yok'}
+        </p>
+        <div class="flex gap-2">
+          <button data-action="add-bulk-row" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+            <i data-lucide="plus" class="w-[14px] h-[14px]"></i> Satır Ekle
+          </button>
+          <button data-action="import-bulk" ${state.bulkImporting || rows.length === 0 ? 'disabled' : ''} class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700 disabled:opacity-50">
+            ${state.bulkImporting ? 'Aktarılıyor…' : 'İçeri Aktar'}
+          </button>
+        </div>
+      </div>
+
+      ${rows.length === 0 ? `
+        <p class="mt-3 text-xs text-ink-800/50 dark:text-sand-100/45">
+          Dosya yükleyin ya da yukarıdaki "Satır Ekle" ile elle çalışan girmeye başlayın.
+        </p>` : `
+      <div class="mt-3 overflow-auto rounded-lg border border-black/5 dark:border-white/5">
+        <table class="w-full min-w-[820px] text-left text-xs">
+          <thead class="bg-sand-50 dark:bg-ink-900"><tr class="text-ink-800/50 dark:text-sand-100/45">
+            <th class="px-2 py-2 font-medium">Ad</th>
+            <th class="px-2 py-2 font-medium">Soyad</th>
+            <th class="px-2 py-2 font-medium">Sicil No</th>
+            <th class="px-2 py-2 font-medium">Departman</th>
+            <th class="px-2 py-2 font-medium">İzin Hakkı</th>
+            <th class="px-2 py-2 font-medium">Başlangıç</th>
+            <th class="px-2 py-2 font-medium">Bitiş</th>
+            <th class="px-2 py-2 font-medium">Şifre (boş=otomatik)</th>
+            <th class="px-2 py-2 font-medium"></th>
+          </tr></thead>
+          <tbody class="divide-y divide-black/5 dark:divide-white/5">
+            ${rows.map((r, i) => `<tr>
+              <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="first_name" value="${escapeHtml(r.first_name || '')}" /></td>
+              <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="last_name" value="${escapeHtml(r.last_name || '')}" /></td>
+              <td class="px-1.5 py-1.5"><input class="bulk-cell w-20 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="registry_number" value="${escapeHtml(r.registry_number || '')}" /></td>
+              <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="department" value="${escapeHtml(r.department || '')}" /></td>
+              <td class="px-1.5 py-1.5"><input type="number" class="bulk-cell w-16 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="annual_leave_total" value="${escapeHtml(r.annual_leave_total ?? 14)}" /></td>
+              <td class="px-1.5 py-1.5"><input type="time" class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="flexible_hours_start" value="${escapeHtml(r.flexible_hours_start || '09:00')}" /></td>
+              <td class="px-1.5 py-1.5"><input type="time" class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="flexible_hours_end" value="${escapeHtml(r.flexible_hours_end || '18:00')}" /></td>
+              <td class="px-1.5 py-1.5"><input class="bulk-cell w-24 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="password" value="${escapeHtml(r.password || '')}" placeholder="otomatik" /></td>
+              <td class="px-1.5 py-1.5">
+                <button data-action="remove-bulk-row" data-index="${i}" class="flex h-7 w-7 items-center justify-center rounded text-ink-800/40 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/40" aria-label="Satırı sil">
+                  <i data-lucide="trash-2" class="w-[13px] h-[13px]"></i>
+                </button>
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>`;
+
+  const results = state.bulkResults ? `
+    <div class="mt-6 space-y-1.5">
+      <p class="text-sm font-medium text-ink-900 dark:text-sand-50">Sonuçlar</p>
+      ${state.bulkResults.map(r => `
+        <div class="flex items-center gap-2 rounded-lg bg-sand-50 dark:bg-ink-900 px-3 py-2 text-xs">
+          <i data-lucide="${r.success ? 'check-circle-2' : 'x-circle'}" class="w-[14px] h-[14px] shrink-0 ${r.success ? 'text-pine-600 dark:text-pine-400' : 'text-brick-500'}"></i>
+          <span class="text-ink-800 dark:text-sand-100">Sicil No: ${escapeHtml(r.registry_number)}</span>
+          ${!r.success ? `<span class="text-brick-500">— ${escapeHtml(r.error)}</span>` : ''}
+          ${r.success && r.password ? `<span class="text-pine-700 dark:text-gold-400">— Şifre: ${escapeHtml(r.password)}</span>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+  <div class="grid gap-5 lg:grid-cols-3">
+    <div class="card p-6 lg:col-span-2 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div id="dropzone" class="flex cursor-pointer flex-col items-center justify-center rounded-xl2 border-2 border-dashed border-pine-300 dark:border-pine-700 bg-pine-50/40 dark:bg-pine-900/10 px-6 py-10 text-center transition hover:bg-pine-50 dark:hover:bg-pine-900/20">
+        <i data-lucide="upload-cloud" class="w-7 h-7 text-pine-600 dark:text-pine-400"></i>
+        <p class="mt-2 text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(state.bulkFileName) || 'Dosyayı sürükleyip bırakın veya tıklayın'}</p>
+        <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">.csv, .xlsx veya .xls desteklenir — veya aşağıdan elle satır ekleyin</p>
+        <input id="bulk-file-input" type="file" accept=".csv,.xlsx,.xls" class="hidden" />
+      </div>
+      ${table}
+      ${results}
+    </div>
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
+        <i data-lucide="file-spreadsheet" class="w-[18px] h-[18px]"></i>
+      </div>
+      <h3 class="mt-3 font-display text-sm font-semibold text-ink-900 dark:text-sand-50">Dosya Formatı</h3>
+      <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
+        Dosyanız şu kolonları içermelidir: <strong>registry_number, first_name, last_name, department, annual_leave_total, flexible_hours_start, flexible_hours_end</strong>.
+        Türkçe başlıklar (Sicil No, Ad, Soyad, Departman, Yıllık İzin) da otomatik tanınır. İsteğe bağlı bir <strong>password</strong> kolonu eklerseniz o şifre kullanılır; eklemezseniz her çalışan için otomatik bir şifre üretilir ve sonuç listesinde gösterilir.
+      </p>
+      <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
+        Dosyanız yoksa sorun değil — soldaki tabloya "Satır Ekle" ile elle de girebilirsiniz.
+      </p>
+      <button data-action="download-template" class="btn-secondary mt-4 w-full text-xs inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="download" class="w-[14px] h-[14px]"></i> Şablon İndir (.csv)
+      </button>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — DUYURULAR
+   ===================================================================== */
+function adminAnnouncementsView() {
+  const items = state.announcements;
+  return `
+  <div class="mb-5 flex justify-end">
+    <button data-action="open-announcement-form" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+      <i data-lucide="plus" class="w-4 h-4"></i> Yeni Duyuru
+    </button>
+  </div>
+  ${items.length === 0
+    ? `<div class="card p-10 text-center text-sm text-ink-800/50 dark:text-sand-100/45 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">Henüz duyuru oluşturulmadı.</div>`
+    : `<div class="space-y-4">${items.map(a => announcementCard(a, true)).join('')}</div>`}`;
+}
+
+/* =====================================================================
+   MODALLAR
+   ===================================================================== */
+function modalHtml() {
+  if (!state.modal) return '';
+  if (state.modal.type === 'employee') return employeeModal(state.modal.data);
+  if (state.modal.type === 'announcement') return announcementModal(state.modal.data);
+  if (state.modal.type === 'periodic-check') return periodicCheckModal(state.modal.data);
+  return '';
+}
+
+function employeeModal(emp) {
+  const isEdit = Boolean(emp);
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Çalışanı Düzenle' : 'Yeni Çalışan Ekle'}</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="employee-form" data-id="${isEdit ? emp.id : ''}" class="space-y-4 px-6 py-5">
+        ${!isEdit ? `
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Ad</label><input name="first_name" required class="input" /></div>
+          <div><label class="label">Soyad</label><input name="last_name" required class="input" /></div>
+        </div>
+        <div><label class="label">Sicil No</label><input name="registry_number" type="text" required class="input" placeholder="Örn. 1024" /></div>
+        <div><label class="label">Şifre (siz belirleyin)</label><input name="password" type="text" minlength="6" required class="input" placeholder="En az 6 karakter" /></div>
+        <label class="flex items-center gap-2.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 p-3.5">
+          <input type="checkbox" name="is_admin" id="is-admin-checkbox" class="h-4 w-4 rounded border-black/20 text-pine-600 focus:ring-pine-500" />
+          <span class="text-sm text-ink-800 dark:text-sand-100">Bu kişiyi <strong>Yönetici (Admin)</strong> yetkisiyle ekle</span>
+        </label>
+        <p class="text-xs text-ink-800/45 dark:text-sand-100/40 -mt-2">Yönetici olarak eklenen kişiler, çalışan listesinde görünmez; onlar da bu panele Sicil No + şifreleriyle admin yetkisiyle giriş yapabilir.</p>
+        ` : ''}
+        <div>
+          <label class="label">Departman</label>
+          <select name="department_select" id="department-select" class="input">
+            <option value="Kapı Hattı" ${isEdit && emp.department === 'Kapı Hattı' ? 'selected' : ''}>Kapı Hattı</option>
+            <option value="Montaj Hattı" ${isEdit && emp.department === 'Montaj Hattı' ? 'selected' : ''}>Montaj Hattı</option>
+            <option value="Hazırlama Hattı" ${isEdit && emp.department === 'Hazırlama Hattı' ? 'selected' : ''}>Hazırlama Hattı</option>
+            <option value="__other__" ${isEdit && emp.department && !['Kapı Hattı', 'Montaj Hattı', 'Hazırlama Hattı'].includes(emp.department) ? 'selected' : ''}>Diğer (yazın)</option>
+          </select>
+          <input name="department_other" id="department-other" class="input mt-2 ${isEdit && emp.department && !['Kapı Hattı', 'Montaj Hattı', 'Hazırlama Hattı'].includes(emp.department) ? '' : 'hidden'}" placeholder="Departman adını yazın" value="${isEdit && emp.department && !['Kapı Hattı', 'Montaj Hattı', 'Hazırlama Hattı'].includes(emp.department) ? escapeHtml(emp.department) : ''}" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Yıllık İzin Hakkı (gün)</label><input name="annual_leave_total" type="number" min="0" required class="input" value="${isEdit ? emp.annual_leave_total : 14}" /></div>
+          ${isEdit ? `<div><label class="label">Kullanılan İzin (gün)</label><input name="annual_leave_used" type="number" min="0" required class="input" value="${emp.annual_leave_used}" /></div>` : ''}
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Mesai Başlangıç</label><input name="flexible_hours_start" type="time" class="input" value="${isEdit ? timeShort(emp.flexible_hours_start) : '09:00'}" /></div>
+          <div><label class="label">Mesai Bitiş</label><input name="flexible_hours_end" type="time" class="input" value="${isEdit ? timeShort(emp.flexible_hours_end) : '18:00'}" /></div>
+        </div>
+        <div><label class="label">Esnek Çalışma Notu</label><input name="flexible_work_note" class="input" value="${isEdit ? escapeHtml(emp.flexible_work_note || '') : 'Standart mesai'}" /></div>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Saat Bakiyesi (borç/alacak, örn. -7,5)</label><input name="flex_time_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.flex_time_balance ?? 0) : 0}" /></div>
+          <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
+        </div>
+        ${isEdit ? `
+        <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4">
+          <label class="label">Yeni Şifre Belirle (opsiyonel)</label>
+          <input name="new_password" type="text" minlength="6" class="input" placeholder="Değiştirmek istemiyorsanız boş bırakın" />
+          <p class="mt-1.5 text-xs text-ink-800/45 dark:text-sand-100/40">Doldurursanız çalışanın şifresi anında bu değere güncellenir. En az 6 karakter.</p>
+        </div>
+        ` : ''}
+        <div id="employee-form-error"></div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Vazgeç</button>
+          <button type="submit" id="employee-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">${isEdit ? 'Değişiklikleri Kaydet' : 'Çalışanı Ekle'}</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <style>.input{width:100%;border-radius:.5rem;border:1px solid rgba(0,0,0,.1);padding:.625rem .875rem;font-size:.875rem;outline:none;background:white}
+  .dark .input{background:#101715;border-color:rgba(255,255,255,.1);color:#f5f1e8}
+  .input:focus{border-color:#205c52;box-shadow:0 0 0 1px #205c52}
+  .label{display:block;font-size:.875rem;font-weight:500;margin-bottom:.375rem;color:#16201d}
+  .dark .label{color:#eadfc8}</style>`;
+}
+
+function announcementModal(ann) {
+  const isEdit = Boolean(ann);
+  const dateVal = isEdit ? ann.published_at.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="w-full max-w-lg rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Duyuruyu Düzenle' : 'Yeni Duyuru'}</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="announcement-form" data-id="${isEdit ? ann.id : ''}" class="space-y-4 px-6 py-5">
+        <div><label class="label">Başlık</label><input name="title" required class="input" value="${isEdit ? escapeHtml(ann.title) : ''}" /></div>
+        <div><label class="label">İçerik</label><textarea name="content" required rows="5" class="input resize-none">${isEdit ? escapeHtml(ann.content) : ''}</textarea></div>
+        <div><label class="label">Yayın Tarihi</label><input name="published_at" type="date" required class="input" value="${dateVal}" /></div>
+        <div id="announcement-form-error"></div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Vazgeç</button>
+          <button type="submit" id="announcement-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">Kaydet</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+function periodicCheckModal(check) {
+  const isEdit = Boolean(check);
+  const knownTypes = ['saglik', 'revir', 'hastane', 'egitim'];
+  const isOtherType = isEdit && check.check_type && !knownTypes.includes(check.check_type);
+  const employees = state.employees;
+
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Kontrolü Düzenle' : 'Yeni Periyodik Kontrol'}</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="periodic-check-form" data-id="${isEdit ? check.id : ''}" class="space-y-4 px-6 py-5">
+        <div>
+          <label class="label">Çalışan</label>
+          <select name="employee_id" required class="input">
+            <option value="">Seçin…</option>
+            ${employees.map(e => `<option value="${e.id}" ${isEdit && check.employee_id === e.id ? 'selected' : ''}>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)} — ${escapeHtml(e.department)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label class="label">Kontrol Türü</label>
+          <select name="check_type_select" id="check-type-select" class="input">
+            <option value="saglik" ${isEdit && check.check_type === 'saglik' ? 'selected' : ''}>Periyodik Sağlık Kontrolü</option>
+            <option value="revir" ${isEdit && check.check_type === 'revir' ? 'selected' : ''}>Revir Kontrolü</option>
+            <option value="hastane" ${isEdit && check.check_type === 'hastane' ? 'selected' : ''}>Hastane Kontrolü</option>
+            <option value="egitim" ${isEdit && check.check_type === 'egitim' ? 'selected' : ''}>Eğitim</option>
+            <option value="__other__" ${isOtherType ? 'selected' : ''}>Diğer (yazın)</option>
+          </select>
+          <input name="check_type_other" id="check-type-other" class="input mt-2 ${isOtherType ? '' : 'hidden'}" placeholder="Kontrol türünü yazın" value="${isOtherType ? escapeHtml(check.check_type) : ''}" />
+        </div>
+        <div>
+          <label class="label">Tarih</label>
+          <input name="due_date" type="date" required class="input" value="${isEdit ? check.due_date : new Date().toISOString().slice(0, 10)}" />
+        </div>
+        <div>
+          <label class="label">Durum</label>
+          <select name="status" required class="input">
+            ${Object.entries(PERIODIC_STATUS_LABELS).map(([val, label]) => `<option value="${val}" ${isEdit && check.status === val ? 'selected' : (!isEdit && val === 'yaklasiyor' ? 'selected' : '')}>${label}</option>`).join('')}
+          </select>
+        </div>
+        <div id="periodic-check-form-error"></div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Vazgeç</button>
+          <button type="submit" id="periodic-check-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">${isEdit ? 'Değişiklikleri Kaydet' : 'Kontrolü Ekle'}</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+/* =====================================================================
+   OLAY YÖNETİMİ (event delegation)
+   ===================================================================== */
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-action]');
+
+  // Modal dışına tıklayınca kapat (içeriğe tıklamayı hariç tut)
+  if (el && el.dataset.action === 'modal-backdrop' && e.target === el) {
+    state.modal = null; render(); return;
+  }
+
+  const link = e.target.closest('a[data-action="nav-link"]');
+  if (link) { state.sidebarOpen = false; /* hashchange render'ı tetikler */ return; }
+
+  if (!el) return;
+  const action = el.dataset.action;
+
+  switch (action) {
+    case 'open-sidebar': state.sidebarOpen = true; render(); break;
+    case 'close-sidebar': state.sidebarOpen = false; render(); break;
+    case 'toggle-theme': toggleTheme(); break;
+    case 'logout': await fbAuth.signOut(); break;
+    case 'close-modal': state.modal = null; render(); break;
+    case 'open-employee-form': state.modal = { type: 'employee', data: null }; render(); break;
+    case 'edit-employee': {
+      const emp = state.employees.find(x => x.id === el.dataset.id);
+      state.modal = { type: 'employee', data: emp }; render(); break;
+    }
+    case 'delete-employee': {
+      if (confirm(`${el.dataset.name} adlı çalışanı silmek istediğinize emin misiniz?`)) {
+        try {
+          await callFunction('delete-employee', { uid: el.dataset.id });
+        } catch (err) {
+          alert(err.message);
+        }
+        await loadEmployees(); render();
+      }
+      break;
+    }
+    case 'open-announcement-form': state.modal = { type: 'announcement', data: null }; render(); break;
+    case 'edit-announcement': {
+      const ann = state.announcements.find(x => x.id === el.dataset.id);
+      state.modal = { type: 'announcement', data: ann }; render(); break;
+    }
+    case 'delete-announcement': {
+      if (confirm('Bu duyuruyu silmek istediğinize emin misiniz?')) {
+        await db.collection('announcements').doc(el.dataset.id).delete();
+        await loadAnnouncements(); render();
+      }
+      break;
+    }
+    case 'download-template': downloadTemplate(); break;
+    case 'import-bulk': await handleBulkImport(); break;
+    case 'add-bulk-row':
+      state.bulkRows = [...state.bulkRows, {
+        first_name: '', last_name: '', registry_number: '', department: '',
+        annual_leave_total: 14, flexible_hours_start: '09:00', flexible_hours_end: '18:00', password: ''
+      }];
+      render();
+      break;
+    case 'remove-bulk-row':
+      state.bulkRows = state.bulkRows.filter((_, idx) => idx !== Number(el.dataset.index));
+      render();
+      break;
+    case 'delete-report': {
+      if (confirm('Bu bildirimi silmek istediğinize emin misiniz?')) {
+        await db.collection('reports').doc(el.dataset.id).delete();
+        await loadAllReports(); render();
+      }
+      break;
+    }
+    case 'filter-reports':
+      state.adminReportFilter = el.dataset.value;
+      render();
+      break;
+    case 'open-periodic-check-form':
+      state.modal = { type: 'periodic-check', data: null };
+      render();
+      break;
+    case 'edit-periodic-check': {
+      const check = state.periodicChecks.find(x => x.id === el.dataset.id);
+      state.modal = { type: 'periodic-check', data: check };
+      render();
+      break;
+    }
+    case 'delete-periodic-check': {
+      if (confirm('Bu periyodik kontrolü silmek istediğinize emin misiniz?')) {
+        await db.collection('periodicChecks').doc(el.dataset.id).delete();
+        await loadAllPeriodicChecks(); render();
+      }
+      break;
+    }
+  }
+});
+
+document.addEventListener('change', async (e) => {
+  if (e.target.dataset.action === 'change-report-status') {
+    const id = e.target.dataset.id;
+    const status = e.target.value;
+    await db.collection('reports').doc(id).update({ status });
+    await loadAllReports(); render();
+  }
+  if (e.target.id === 'department-select') {
+    const other = document.getElementById('department-other');
+    if (other) {
+      if (e.target.value === '__other__') {
+        other.classList.remove('hidden');
+        other.focus();
+      } else {
+        other.classList.add('hidden');
+      }
+    }
+  }
+  if (e.target.id === 'check-type-select') {
+    const other = document.getElementById('check-type-other');
+    if (other) {
+      if (e.target.value === '__other__') {
+        other.classList.remove('hidden');
+        other.focus();
+      } else {
+        other.classList.add('hidden');
+      }
+    }
+  }
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'employee-search') {
+    state.employeeSearch = e.target.value;
+    const route = currentRoute();
+    if (route === '#/admin/employees') {
+      // sadece tabloyu yeniden çiz (tüm sayfayı değil, input odağını korumak için)
+      const main = document.querySelector('main');
+      const caret = e.target.selectionStart;
+      main.innerHTML = adminEmployeesView();
+      icons();
+      const input = document.getElementById('employee-search');
+      if (input) { input.focus(); input.setSelectionRange(caret, caret); }
+    }
+  }
+  if (e.target.classList.contains('bulk-cell')) {
+    const idx = Number(e.target.dataset.row);
+    const field = e.target.dataset.field;
+    if (state.bulkRows[idx]) state.bulkRows[idx][field] = e.target.value;
+  }
+});
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id === 'login-form') {
+    e.preventDefault();
+    const registryNumber = document.getElementById('login-registry').value;
+    const password = document.getElementById('login-password').value;
+    const btn = document.getElementById('login-submit');
+    const errBox = document.getElementById('login-error');
+    errBox.innerHTML = '';
+    btn.disabled = true; btn.textContent = 'Giriş yapılıyor…';
+
+    const email = await resolveEmailFromRegistryNumber(registryNumber);
+    if (!email) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Bu sicil numarasıyla kayıtlı bir kullanıcı bulunamadı.</p>`;
+      btn.disabled = false; btn.textContent = 'Giriş Yap';
+      return;
+    }
+
+    try {
+      await fbAuth.signInWithEmailAndPassword(email, password);
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Sicil numarası veya şifre hatalı. Lütfen tekrar deneyin.</p>`;
+      btn.disabled = false; btn.textContent = 'Giriş Yap';
+    }
+    return;
+  }
+
+  if (e.target.id === 'report-form') {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    state.reportFormError = '';
+    state.reportSubmitting = true;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Gönderiliyor…'; }
+
+    try {
+      await db.collection('reports').add({
+        type: fd.get('type'),
+        riskLevel: fd.get('risk_level'),
+        description: fd.get('description'),
+        date: fd.get('date'),
+        shift: fd.get('shift'),
+        department: fd.get('department'),
+        photo: state.reportPhotoData || null,
+        status: 'yeni',
+        submittedBy: state.profile.id,
+        submitterName: `${state.profile.first_name} ${state.profile.last_name}`,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      state.reportPhotoData = null;
+      state.reportSubmitting = false;
+      await loadMyReports(state.profile.id);
+      render();
+    } catch (err) {
+      state.reportFormError = err.message || 'Bildirim gönderilirken bir hata oluştu.';
+      state.reportSubmitting = false;
+      render();
+    }
+    return;
+  }
+
+  if (e.target.id === 'employee-form') {
+    e.preventDefault();
+    const form = e.target;
+    const id = form.dataset.id;
+    const fd = new FormData(form);
+    const btn = document.getElementById('employee-form-submit');
+    const errBox = document.getElementById('employee-form-error');
+    errBox.innerHTML = '';
+    btn.disabled = true; btn.textContent = 'Kaydediliyor…';
+
+    try {
+      const deptSelect = fd.get('department_select');
+      const department = deptSelect === '__other__' ? (fd.get('department_other') || '').trim() : deptSelect;
+      if (!department) {
+        throw new Error('Lütfen bir departman seçin veya "Diğer" için isim yazın.');
+      }
+
+      if (id) {
+        await db.collection('profiles').doc(id).update({
+          department,
+          annualLeaveTotal: Number(fd.get('annual_leave_total')),
+          annualLeaveUsed: Number(fd.get('annual_leave_used')),
+          flexibleHoursStart: fd.get('flexible_hours_start'),
+          flexibleHoursEnd: fd.get('flexible_hours_end'),
+          flexibleWorkNote: fd.get('flexible_work_note'),
+          flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
+          deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0
+        });
+
+        const newPassword = fd.get('new_password');
+        if (newPassword && newPassword.trim().length > 0) {
+          if (newPassword.trim().length < 6) {
+            throw new Error('Yeni şifre en az 6 karakter olmalı.');
+          }
+          await callFunction('change-password', { uid: id, new_password: newPassword.trim() });
+        }
+      } else {
+        await callFunction('create-employee', {
+          registry_number: fd.get('registry_number'),
+          password: fd.get('password'),
+          first_name: fd.get('first_name'),
+          last_name: fd.get('last_name'),
+          department,
+          role: fd.get('is_admin') ? 'admin' : 'employee',
+          annual_leave_total: Number(fd.get('annual_leave_total')),
+          flexible_hours_start: fd.get('flexible_hours_start'),
+          flexible_hours_end: fd.get('flexible_hours_end'),
+          flexible_work_note: fd.get('flexible_work_note'),
+          flex_time_balance: Number(fd.get('flex_time_balance')) || 0,
+          deducted_hours_balance: Number(fd.get('deducted_hours_balance')) || 0
+        });
+      }
+      state.modal = null;
+      await loadEmployees();
+      render();
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
+      btn.disabled = false; btn.textContent = id ? 'Değişiklikleri Kaydet' : 'Çalışanı Ekle';
+    }
+    return;
+  }
+
+  if (e.target.id === 'announcement-form') {
+    e.preventDefault();
+    const form = e.target;
+    const id = form.dataset.id;
+    const fd = new FormData(form);
+    const btn = document.getElementById('announcement-form-submit');
+    btn.disabled = true; btn.textContent = 'Kaydediliyor…';
+
+    const publishedAt = firebase.firestore.Timestamp.fromDate(new Date(fd.get('published_at')));
+    let ok = true;
+    try {
+      if (id) {
+        await db.collection('announcements').doc(id).update({
+          title: fd.get('title'),
+          content: fd.get('content'),
+          publishedAt
+        });
+      } else {
+        await db.collection('announcements').add({
+          title: fd.get('title'),
+          content: fd.get('content'),
+          publishedAt,
+          createdBy: state.session.user.uid,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+    } catch {
+      ok = false;
+    }
+    if (ok) {
+      state.modal = null;
+      await loadAnnouncements();
+      render();
+    } else {
+      document.getElementById('announcement-form-error').innerHTML =
+        `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Kaydedilirken bir hata oluştu.</p>`;
+      btn.disabled = false; btn.textContent = 'Kaydet';
+    }
+    return;
+  }
+
+  if (e.target.id === 'periodic-check-form') {
+    e.preventDefault();
+    const form = e.target;
+    const id = form.dataset.id;
+    const fd = new FormData(form);
+    const btn = document.getElementById('periodic-check-form-submit');
+    const errBox = document.getElementById('periodic-check-form-error');
+    errBox.innerHTML = '';
+    btn.disabled = true; btn.textContent = 'Kaydediliyor…';
+
+    try {
+      const employeeId = fd.get('employee_id');
+      if (!employeeId) throw new Error('Lütfen bir çalışan seçin.');
+      const emp = state.employees.find(x => x.id === employeeId);
+      if (!emp) throw new Error('Seçilen çalışan bulunamadı.');
+
+      const typeSelect = fd.get('check_type_select');
+      const checkType = typeSelect === '__other__' ? (fd.get('check_type_other') || '').trim() : typeSelect;
+      if (!checkType) throw new Error('Lütfen bir kontrol türü seçin veya "Diğer" için isim yazın.');
+
+      const payload = {
+        employeeId,
+        employeeName: `${emp.first_name} ${emp.last_name}`,
+        department: emp.department,
+        checkType,
+        dueDate: fd.get('due_date'),
+        status: fd.get('status')
+      };
+
+      if (id) {
+        await db.collection('periodicChecks').doc(id).update(payload);
+      } else {
+        await db.collection('periodicChecks').add({
+          ...payload,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      state.modal = null;
+      await loadAllPeriodicChecks();
+      render();
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
+      btn.disabled = false; btn.textContent = id ? 'Değişiklikleri Kaydet' : 'Kontrolü Ekle';
+    }
+  }
+});
+
+/* Dosya seçim / sürükle-bırak (Toplu Ekleme) */
+document.addEventListener('click', (e) => {
+  if (e.target.closest('#dropzone')) {
+    const input = document.getElementById('bulk-file-input');
+    if (input) input.click();
+  }
+});
+document.addEventListener('change', (e) => {
+  if (e.target.id === 'bulk-file-input') {
+    const file = e.target.files?.[0];
+    if (file) parseBulkFile(file);
+  }
+  if (e.target.id === 'report-photo-input') {
+    const file = e.target.files?.[0];
+    if (file) {
+      compressImageToBase64(file).then(dataUrl => {
+        state.reportPhotoData = dataUrl;
+        const preview = document.getElementById('report-photo-preview');
+        if (preview) {
+          preview.innerHTML = `<img src="${dataUrl}" class="mt-2 max-h-40 rounded-lg border border-black/10 dark:border-white/10" />`;
+        }
+      });
+    }
+  }
+});
+document.addEventListener('dragover', (e) => {
+  if (e.target.closest('#dropzone')) e.preventDefault();
+});
+document.addEventListener('drop', (e) => {
+  const dz = e.target.closest('#dropzone');
+  if (dz) {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) parseBulkFile(file);
+  }
+});
+
+function parseBulkFile(file) {
+  state.bulkFileName = file.name;
+  state.bulkResults = null;
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+  if (isCsv) {
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: (res) => { state.bulkRows = res.data.map(mapRow).filter(r => r.registry_number); render(); }
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const wb = XLSX.read(ev.target.result, { type: 'binary' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet);
+      state.bulkRows = json.map(mapRow).filter(r => r.registry_number);
+      render();
+    };
+    reader.readAsBinaryString(file);
+  }
+}
+
+function downloadTemplate() {
+  const csv = 'registry_number,first_name,last_name,department,annual_leave_total,flexible_hours_start,flexible_hours_end,password\n1024,Ayşe,Yılmaz,Muhasebe,14,09:00,18:00,\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'calisan_sablonu.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function handleBulkImport() {
+  state.bulkImporting = true; render();
+  try {
+    const data = await callFunction('bulk-import-employees', {
+      employees: state.bulkRows.map(r => ({ ...r, annual_leave_total: r.annual_leave_total ? Number(r.annual_leave_total) : 14 }))
+    });
+    state.bulkResults = data.results;
+  } catch (err) {
+    state.bulkResults = [{ registry_number: '-', success: false, error: err.message }];
+  } finally {
+    state.bulkImporting = false; render();
+  }
+}
+
+/* =====================================================================
+   BAŞLATMA
+   ===================================================================== */
+window.addEventListener('hashchange', render);
+
+applyTheme();
+
+let firstAuthCheck = true;
+fbAuth.onAuthStateChanged(async (user) => {
+  state.session = user ? { user } : null;
+  if (user) {
+    state.profile = await fetchProfile(user.uid);
+    if (!firstAuthCheck && (!location.hash || location.hash === '#/login')) {
+      location.hash = state.profile?.role === 'admin' ? '#/admin' : '#/dashboard';
+    }
+  } else {
+    state.profile = null;
+    if (!firstAuthCheck) location.hash = '#/login';
+  }
+  state.loading = false;
+  firstAuthCheck = false;
+  render();
+});
+</script>
+</body>
+</html>
