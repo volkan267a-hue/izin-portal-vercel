@@ -1167,9 +1167,14 @@ function adminEmployeesView() {
       <input id="employee-search" value="${escapeHtml(state.employeeSearch || '')}" placeholder="İsim, sicil no veya departman ara…"
         class="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 pl-10 pr-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
     </div>
-    <button data-action="open-employee-form" class="btn-primary shrink-0 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
-      <i data-lucide="plus" class="w-4 h-4"></i> Yeni Çalışan
-    </button>
+    <div class="flex shrink-0 gap-2">
+      <button data-action="open-bulk-password-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="key-round" class="w-4 h-4"></i> Tüm Şifreleri Aynı Yap
+      </button>
+      <button data-action="open-employee-form" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+        <i data-lucide="plus" class="w-4 h-4"></i> Yeni Çalışan
+      </button>
+    </div>
   </div>
 
   <div class="card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
@@ -1336,6 +1341,7 @@ function modalHtml() {
   if (state.modal.type === 'employee') return employeeModal(state.modal.data);
   if (state.modal.type === 'announcement') return announcementModal(state.modal.data);
   if (state.modal.type === 'periodic-check') return periodicCheckModal(state.modal.data);
+  if (state.modal.type === 'bulk-password') return bulkPasswordModal();
   return '';
 }
 
@@ -1479,6 +1485,34 @@ function periodicCheckModal(check) {
   </div>`;
 }
 
+function bulkPasswordModal() {
+  const total = state.employees.length;
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="w-full max-w-md rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">Tüm Şifreleri Aynı Yap</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <form id="bulk-password-form" class="space-y-4 px-6 py-5">
+        <p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">
+          Bu işlem, sistemdeki <strong>${total} çalışanın tamamının</strong> şifresini aşağıda gireceğiniz tek şifreyle değiştirir. Geri alınamaz.
+        </p>
+        <div>
+          <label class="label">Yeni Şifre (herkes için ortak)</label>
+          <input name="new_password" type="text" minlength="6" required class="input" placeholder="En az 6 karakter" />
+        </div>
+        <div id="bulk-password-form-error"></div>
+        <div id="bulk-password-results" class="max-h-48 overflow-auto space-y-1"></div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Vazgeç</button>
+          <button type="submit" id="bulk-password-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">Tümünü Değiştir</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
 /* =====================================================================
    OLAY YÖNETİMİ (event delegation)
    ===================================================================== */
@@ -1556,6 +1590,10 @@ document.addEventListener('click', async (e) => {
       break;
     case 'open-periodic-check-form':
       state.modal = { type: 'periodic-check', data: null };
+      render();
+      break;
+    case 'open-bulk-password-form':
+      state.modal = { type: 'bulk-password' };
       render();
       break;
     case 'edit-periodic-check': {
@@ -1829,6 +1867,41 @@ document.addEventListener('submit', async (e) => {
     } catch (err) {
       errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
       btn.disabled = false; btn.textContent = id ? 'Değişiklikleri Kaydet' : 'Kontrolü Ekle';
+    }
+    return;
+  }
+
+  if (e.target.id === 'bulk-password-form') {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const btn = document.getElementById('bulk-password-form-submit');
+    const errBox = document.getElementById('bulk-password-form-error');
+    const resultsBox = document.getElementById('bulk-password-results');
+    errBox.innerHTML = '';
+    resultsBox.innerHTML = '';
+
+    const newPassword = fd.get('new_password');
+    if (!newPassword || newPassword.length < 6) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Şifre en az 6 karakter olmalı.</p>`;
+      return;
+    }
+    if (!confirm('TÜM çalışanların şifresini değiştirmek istediğinize emin misiniz? Bu işlem geri alınamaz.')) {
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Değiştiriliyor…';
+    try {
+      const data = await callFunction('bulk-change-password', { new_password: newPassword });
+      resultsBox.innerHTML = `
+        <p class="text-sm font-medium text-pine-700 dark:text-gold-400">${data.successCount} / ${data.total} çalışanın şifresi değiştirildi.</p>
+        ${data.results.filter(r => !r.success).map(r => `
+          <p class="text-xs text-brick-500">Sicil No ${escapeHtml(r.registry_number || '—')}: ${escapeHtml(r.error)}</p>`).join('')}
+      `;
+      btn.textContent = 'Tamamlandı';
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
+      btn.disabled = false; btn.textContent = 'Tümünü Değiştir';
     }
   }
 });
