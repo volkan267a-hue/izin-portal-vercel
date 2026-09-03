@@ -1146,6 +1146,7 @@ function adminEmployeesView() {
       </td>
       <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
       <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 ${e.flex_time_balance < 0 ? 'text-brick-500 dark:text-brick-500' : ''}">${fmtHours(e.flex_time_balance)}</td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} gün</td>
       <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
       <td class="px-5 py-3.5">
         <div class="flex justify-end gap-1">
@@ -1179,6 +1180,7 @@ function adminEmployeesView() {
             <th class="px-5 py-3.5 font-medium">Ad Soyad</th>
             <th class="px-5 py-3.5 font-medium">Departman</th>
             <th class="px-5 py-3.5 font-medium">Esnek Saat</th>
+            <th class="px-5 py-3.5 font-medium">Kalan Yıllık İzin</th>
             <th class="px-5 py-3.5 font-medium">İzin Kullanımı</th>
             <th class="px-5 py-3.5 font-medium text-right">İşlemler</th>
           </tr></thead>
