@@ -72,6 +72,7 @@
    AYARLAR — Firebase proje bilgilerinizi buraya girin
    (Firebase Console > Project Settings > General > Your apps > Web app > SDK setup and configuration)
    ===================================================================== */
+
 const firebaseConfig = {
   apiKey: "AIzaSyADpucVQrCF3C0GF1RgWY0pAbaxiMxjl9E",
   authDomain: "izin-portali.firebaseapp.com",
@@ -716,6 +717,33 @@ function employeeDashboardView() {
       </div>
     </div>
   </div>
+
+  ${p.annual_leave_start_date && p.annual_leave_end_date ? `
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
+        <i data-lucide="calendar-days" class="w-[18px] h-[18px]"></i>
+      </div>
+      <div>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yıllık İzin Tarihiniz</h2>
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Yöneticiniz tarafından planlanan izin döneminiz</p>
+      </div>
+    </div>
+    <div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
+      <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Başlangıç</p>
+        <p class="mt-1 font-display text-lg font-bold text-pine-700 dark:text-gold-400">${escapeHtml(p.annual_leave_start_date)}</p>
+      </div>
+      <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Bitiş</p>
+        <p class="mt-1 font-display text-lg font-bold text-pine-700 dark:text-gold-400">${escapeHtml(p.annual_leave_end_date)}</p>
+      </div>
+      <div class="col-span-2 rounded-lg bg-sand-50 dark:bg-ink-900 p-4 sm:col-span-1">
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Açıklama</p>
+        <p class="mt-1 text-sm font-medium">${escapeHtml(p.annual_leave_note || '—')}</p>
+      </div>
+    </div>
+  </div>` : ''}
 
   ${state.myPeriodicChecks.length > 0 ? `
   <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
