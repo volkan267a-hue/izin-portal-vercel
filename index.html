@@ -265,6 +265,7 @@ const state = {
   allLeaveEntries: [],
   myLeaveEntries: [],
   bulkLeaveRows: [],
+  bulkLeaveFileName: '',
   bulkLeaveResults: null,
   bulkLeaveSubmitting: false
 };
@@ -1809,7 +1810,19 @@ function bulkLeaveModal() {
         <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
       <div class="px-6 py-5">
-        <div class="flex items-center justify-between">
+        <div id="bulk-leave-dropzone" class="flex cursor-pointer flex-col items-center justify-center rounded-xl2 border-2 border-dashed border-pine-300 dark:border-pine-700 bg-pine-50/40 dark:bg-pine-900/10 px-6 py-6 text-center transition hover:bg-pine-50 dark:hover:bg-pine-900/20">
+          <i data-lucide="upload-cloud" class="w-6 h-6 text-pine-600 dark:text-pine-400"></i>
+          <p class="mt-2 text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(state.bulkLeaveFileName) || 'Excel/CSV dosyası yükleyin veya aşağıdan elle ekleyin'}</p>
+          <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Kolonlar: registry_number, start_date, end_date, note (opsiyonel)</p>
+          <input id="bulk-leave-file-input" type="file" accept=".csv,.xlsx,.xls" class="hidden" />
+        </div>
+        <div class="mt-2 flex justify-end">
+          <button data-action="download-leave-template" class="text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline inline-flex items-center gap-1">
+            <i data-lucide="download" class="w-3 h-3"></i> Şablon İndir (.csv)
+          </button>
+        </div>
+
+        <div class="mt-5 flex items-center justify-between">
           <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${rows.length > 0 ? `${rows.length} satır` : 'Henüz satır yok'}</p>
           <button data-action="add-bulk-leave-row" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
             <i data-lucide="plus" class="w-[14px] h-[14px]"></i> Satır Ekle
@@ -1817,7 +1830,7 @@ function bulkLeaveModal() {
         </div>
 
         ${rows.length === 0 ? `
-          <p class="mt-4 text-xs text-ink-800/50 dark:text-sand-100/45">"Satır Ekle" ile başlayın, her satırda bir çalışan için izin dönemi girin.</p>
+          <p class="mt-4 text-xs text-ink-800/50 dark:text-sand-100/45">Dosya yükleyin veya "Satır Ekle" ile elle bir çalışan için izin dönemi girin.</p>
         ` : `
         <div class="mt-3 overflow-auto rounded-lg border border-black/5 dark:border-white/5">
           <table class="w-full min-w-[640px] text-left text-xs">
@@ -1835,6 +1848,7 @@ function bulkLeaveModal() {
                     <option value="">Seçin…</option>
                     ${employees.map(e => `<option value="${e.id}" ${r.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</option>`).join('')}
                   </select>
+                  ${!r.employeeId && r.employeeLabel ? `<p class="mt-0.5 text-[10px] text-brick-500">${escapeHtml(r.employeeLabel)}</p>` : ''}
                 </td>
                 <td class="px-1.5 py-1.5"><input type="date" class="bulk-leave-cell w-32 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="startDate" value="${r.startDate || ''}" /></td>
                 <td class="px-1.5 py-1.5"><input type="date" class="bulk-leave-cell w-32 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="endDate" value="${r.endDate || ''}" /></td>
@@ -1915,6 +1929,7 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'download-template': downloadTemplate(); break;
+    case 'download-leave-template': downloadLeaveTemplate(); break;
     case 'import-bulk': await handleBulkImport(); break;
     case 'add-bulk-row':
       state.bulkRows = [...state.bulkRows, {
@@ -2389,11 +2404,19 @@ document.addEventListener('click', (e) => {
     const input = document.getElementById('bulk-file-input');
     if (input) input.click();
   }
+  if (e.target.closest('#bulk-leave-dropzone')) {
+    const input = document.getElementById('bulk-leave-file-input');
+    if (input) input.click();
+  }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-file-input') {
     const file = e.target.files?.[0];
     if (file) parseBulkFile(file);
+  }
+  if (e.target.id === 'bulk-leave-file-input') {
+    const file = e.target.files?.[0];
+    if (file) parseBulkLeaveFile(file);
   }
   if (e.target.id === 'report-photo-input') {
     const file = e.target.files?.[0];
@@ -2410,6 +2433,7 @@ document.addEventListener('change', (e) => {
 });
 document.addEventListener('dragover', (e) => {
   if (e.target.closest('#dropzone')) e.preventDefault();
+  if (e.target.closest('#bulk-leave-dropzone')) e.preventDefault();
 });
 document.addEventListener('drop', (e) => {
   const dz = e.target.closest('#dropzone');
@@ -2417,6 +2441,12 @@ document.addEventListener('drop', (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) parseBulkFile(file);
+  }
+  const leaveDz = e.target.closest('#bulk-leave-dropzone');
+  if (leaveDz) {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) parseBulkLeaveFile(file);
   }
 });
 
@@ -2497,6 +2527,77 @@ async function parseBulkFile(file) {
     };
     reader.readAsBinaryString(file);
   }
+}
+
+const LEAVE_COLUMN_MAP = {
+  registry_number: ['registry_number', 'sicil_no', 'sicil no', 'sicil', 'sicil numarasi'],
+  start_date: ['start_date', 'baslangic', 'baslangic_tarihi', 'başlangıç', 'başlangıç tarihi'],
+  end_date: ['end_date', 'bitis', 'bitis_tarihi', 'bitiş', 'bitiş tarihi'],
+  note: ['note', 'aciklama', 'açıklama']
+};
+function mapLeaveRow(rawRow) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(rawRow)) normalized[normalizeKey(key)] = value;
+  const mapped = {};
+  for (const [field, aliases] of Object.entries(LEAVE_COLUMN_MAP)) {
+    const foundKey = aliases.map(normalizeKey).find(a => a in normalized);
+    if (foundKey) mapped[field] = normalized[foundKey];
+  }
+  return mapped;
+}
+function excelSerialToDateStr(value) {
+  // Excel bazen tarihleri seri numara olarak verir (örn. 46000); ISO tarihe çevirir.
+  if (typeof value === 'number') {
+    const date = new Date(Math.round((value - 25569) * 86400 * 1000));
+    return date.toISOString().slice(0, 10);
+  }
+  return String(value || '').trim();
+}
+async function parseBulkLeaveFile(file) {
+  state.bulkLeaveFileName = file.name;
+  state.bulkLeaveResults = null;
+  await ensureBulkImportLibs();
+
+  const toRows = (rawRows) => {
+    const mapped = rawRows.map(mapLeaveRow).filter(r => r.registry_number && r.start_date && r.end_date);
+    return mapped.map(r => {
+      const emp = state.employees.find(e => String(e.registry_number).trim() === String(r.registry_number).trim());
+      return {
+        employeeId: emp ? emp.id : '',
+        employeeLabel: emp ? `${emp.first_name} ${emp.last_name}` : `Sicil No ${r.registry_number} bulunamadı`,
+        startDate: excelSerialToDateStr(r.start_date),
+        endDate: excelSerialToDateStr(r.end_date),
+        note: r.note || ''
+      };
+    });
+  };
+
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+  if (isCsv) {
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: (res) => { state.bulkLeaveRows = toRows(res.data); render(); }
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const wb = XLSX.read(ev.target.result, { type: 'binary' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet);
+      state.bulkLeaveRows = toRows(json);
+      render();
+    };
+    reader.readAsBinaryString(file);
+  }
+}
+
+function downloadLeaveTemplate() {
+  const csv = 'registry_number,start_date,end_date,note\n1024,2026-09-10,2026-09-15,Yıllık izin\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'izin_sablonu.csv'; a.click();
+  URL.revokeObjectURL(url);
 }
 
 function downloadTemplate() {
