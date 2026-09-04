@@ -263,7 +263,10 @@ const state = {
   periodicChecks: [],
   myPeriodicChecks: [],
   allLeaveEntries: [],
-  myLeaveEntries: []
+  myLeaveEntries: [],
+  bulkLeaveRows: [],
+  bulkLeaveResults: null,
+  bulkLeaveSubmitting: false
 };
 
 /* =====================================================================
@@ -1316,7 +1319,13 @@ function adminEmployeesView() {
       <input id="employee-search" value="${escapeHtml(state.employeeSearch || '')}" placeholder="İsim, sicil no veya departman ara…"
         class="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 pl-10 pr-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
     </div>
-    <div class="flex shrink-0 gap-2">
+    <div class="flex shrink-0 flex-wrap gap-2">
+      <button data-action="export-employees-excel" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="file-down" class="w-4 h-4"></i> Excel'e Aktar
+      </button>
+      <button data-action="open-bulk-leave-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="calendar-plus" class="w-4 h-4"></i> Toplu İzin Girişi
+      </button>
       <button data-action="open-bulk-password-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
         <i data-lucide="key-round" class="w-4 h-4"></i> Tüm Şifreleri Aynı Yap
       </button>
@@ -1493,6 +1502,7 @@ function modalHtml() {
   if (state.modal.type === 'bulk-password') return bulkPasswordModal();
   if (state.modal.type === 'department-employees') return departmentEmployeesModal(state.modal.data);
   if (state.modal.type === 'leave-history') return leaveHistoryModal(state.modal.data);
+  if (state.modal.type === 'bulk-leave') return bulkLeaveModal();
   return '';
 }
 
@@ -1776,6 +1786,83 @@ function leaveHistoryModal(employeeId) {
   </div>`;
 }
 
+function bulkLeaveModal() {
+  const rows = state.bulkLeaveRows;
+  const employees = state.employees;
+
+  const results = state.bulkLeaveResults ? `
+    <div class="mt-4 space-y-1.5">
+      <p class="text-sm font-medium text-ink-900 dark:text-sand-50">Sonuçlar</p>
+      ${state.bulkLeaveResults.map(r => `
+        <div class="flex items-center gap-2 rounded-lg bg-sand-50 dark:bg-ink-900 px-3 py-2 text-xs">
+          <i data-lucide="${r.success ? 'check-circle-2' : 'x-circle'}" class="w-[14px] h-[14px] shrink-0 ${r.success ? 'text-pine-600 dark:text-pine-400' : 'text-brick-500'}"></i>
+          <span class="text-ink-800 dark:text-sand-100">${escapeHtml(r.name)}</span>
+          ${!r.success ? `<span class="text-brick-500">— ${escapeHtml(r.error)}</span>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">Toplu İzin Girişi</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="px-6 py-5">
+        <div class="flex items-center justify-between">
+          <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${rows.length > 0 ? `${rows.length} satır` : 'Henüz satır yok'}</p>
+          <button data-action="add-bulk-leave-row" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-xs font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+            <i data-lucide="plus" class="w-[14px] h-[14px]"></i> Satır Ekle
+          </button>
+        </div>
+
+        ${rows.length === 0 ? `
+          <p class="mt-4 text-xs text-ink-800/50 dark:text-sand-100/45">"Satır Ekle" ile başlayın, her satırda bir çalışan için izin dönemi girin.</p>
+        ` : `
+        <div class="mt-3 overflow-auto rounded-lg border border-black/5 dark:border-white/5">
+          <table class="w-full min-w-[640px] text-left text-xs">
+            <thead class="bg-sand-50 dark:bg-ink-900"><tr class="text-ink-800/50 dark:text-sand-100/45">
+              <th class="px-2 py-2 font-medium">Çalışan</th>
+              <th class="px-2 py-2 font-medium">Başlangıç</th>
+              <th class="px-2 py-2 font-medium">Bitiş</th>
+              <th class="px-2 py-2 font-medium">Açıklama</th>
+              <th class="px-2 py-2 font-medium"></th>
+            </tr></thead>
+            <tbody class="divide-y divide-black/5 dark:divide-white/5">
+              ${rows.map((r, i) => `<tr>
+                <td class="px-1.5 py-1.5">
+                  <select class="bulk-leave-cell w-40 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="employeeId">
+                    <option value="">Seçin…</option>
+                    ${employees.map(e => `<option value="${e.id}" ${r.employeeId === e.id ? 'selected' : ''}>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</option>`).join('')}
+                  </select>
+                </td>
+                <td class="px-1.5 py-1.5"><input type="date" class="bulk-leave-cell w-32 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="startDate" value="${r.startDate || ''}" /></td>
+                <td class="px-1.5 py-1.5"><input type="date" class="bulk-leave-cell w-32 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="endDate" value="${r.endDate || ''}" /></td>
+                <td class="px-1.5 py-1.5"><input class="bulk-leave-cell w-32 rounded border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 px-2 py-1.5 text-xs" data-row="${i}" data-field="note" value="${escapeHtml(r.note || '')}" placeholder="opsiyonel" /></td>
+                <td class="px-1.5 py-1.5">
+                  <button data-action="remove-bulk-leave-row" data-index="${i}" class="flex h-7 w-7 items-center justify-center rounded text-ink-800/40 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/40" aria-label="Satırı sil">
+                    <i data-lucide="trash-2" class="w-[13px] h-[13px]"></i>
+                  </button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
+
+        ${results}
+        <div id="bulk-leave-error"></div>
+
+        <div class="mt-5 flex justify-end gap-3">
+          <button data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Kapat</button>
+          <button data-action="submit-bulk-leave" ${state.bulkLeaveSubmitting || rows.length === 0 ? 'disabled' : ''} class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700 disabled:opacity-50">
+            ${state.bulkLeaveSubmitting ? 'Kaydediliyor…' : 'Tümünü Kaydet'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
 /* =====================================================================
    OLAY YÖNETİMİ (event delegation)
    ===================================================================== */
@@ -1859,6 +1946,58 @@ document.addEventListener('click', async (e) => {
       state.modal = { type: 'bulk-password' };
       render();
       break;
+    case 'export-employees-excel':
+      await exportEmployeesToExcel();
+      break;
+    case 'open-bulk-leave-form':
+      state.bulkLeaveResults = null;
+      state.modal = { type: 'bulk-leave' };
+      render();
+      break;
+    case 'add-bulk-leave-row':
+      state.bulkLeaveRows = [...state.bulkLeaveRows, { employeeId: '', startDate: '', endDate: '', note: '' }];
+      render();
+      break;
+    case 'remove-bulk-leave-row':
+      state.bulkLeaveRows = state.bulkLeaveRows.filter((_, idx) => idx !== Number(el.dataset.index));
+      render();
+      break;
+    case 'submit-bulk-leave': {
+      const errBox = document.getElementById('bulk-leave-error');
+      if (errBox) errBox.innerHTML = '';
+      const invalid = state.bulkLeaveRows.find(r => !r.employeeId || !r.startDate || !r.endDate);
+      if (invalid) {
+        if (errBox) errBox.innerHTML = `<p class="mt-3 rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Her satırda çalışan, başlangıç ve bitiş tarihi seçilmeli.</p>`;
+        break;
+      }
+      state.bulkLeaveSubmitting = true;
+      render();
+      const results = [];
+      for (const row of state.bulkLeaveRows) {
+        const emp = state.employees.find(x => x.id === row.employeeId);
+        if (!emp) { results.push({ name: '—', success: false, error: 'Çalışan bulunamadı' }); continue; }
+        try {
+          await db.collection('leaveEntries').add({
+            employeeId: row.employeeId,
+            employeeName: `${emp.first_name} ${emp.last_name}`,
+            department: emp.department,
+            startDate: row.startDate,
+            endDate: row.endDate,
+            note: row.note || '',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          results.push({ name: `${emp.first_name} ${emp.last_name}`, success: true });
+        } catch (err) {
+          results.push({ name: `${emp.first_name} ${emp.last_name}`, success: false, error: err.message || 'Bilinmeyen hata' });
+        }
+      }
+      await loadAllLeaveEntries();
+      state.bulkLeaveResults = results;
+      state.bulkLeaveRows = [];
+      state.bulkLeaveSubmitting = false;
+      render();
+      break;
+    }
     case 'show-department-employees':
       state.modal = { type: 'department-employees', data: el.dataset.value };
       render();
@@ -1894,6 +2033,11 @@ document.addEventListener('click', async (e) => {
 });
 
 document.addEventListener('change', async (e) => {
+  if (e.target.classList.contains('bulk-leave-cell')) {
+    const idx = Number(e.target.dataset.row);
+    const field = e.target.dataset.field;
+    if (state.bulkLeaveRows[idx]) state.bulkLeaveRows[idx][field] = e.target.value;
+  }
   if (e.target.dataset.action === 'change-report-status') {
     const id = e.target.dataset.id;
     const status = e.target.value;
@@ -1946,6 +2090,11 @@ document.addEventListener('input', (e) => {
     const idx = Number(e.target.dataset.row);
     const field = e.target.dataset.field;
     if (state.bulkRows[idx]) state.bulkRows[idx][field] = e.target.value;
+  }
+  if (e.target.classList.contains('bulk-leave-cell')) {
+    const idx = Number(e.target.dataset.row);
+    const field = e.target.dataset.field;
+    if (state.bulkLeaveRows[idx]) state.bulkLeaveRows[idx][field] = e.target.value;
   }
 });
 
@@ -2288,6 +2437,43 @@ function loadScriptOnce(url) {
 async function ensureBulkImportLibs() {
   if (!window.Papa) await loadScriptOnce('https://unpkg.com/papaparse@5.4.1/papaparse.min.js');
   if (!window.XLSX) await loadScriptOnce('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js');
+}
+
+async function exportEmployeesToExcel() {
+  await ensureBulkImportLibs();
+  const rows = state.employees.map(e => ({
+    'Ad': e.first_name,
+    'Soyad': e.last_name,
+    'Sicil No': e.registry_number,
+    'Departman': e.department,
+    'Yıllık İzin Hakkı (gün)': e.annual_leave_total,
+    'Kullanılan İzin (gün)': e.annual_leave_used,
+    'Kalan İzin (gün)': Math.max(e.annual_leave_total - e.annual_leave_used, 0),
+    'Esnek Bakiye (saat)': e.flex_time_balance ?? 0,
+    'Kesilen Saat Bakiyesi': e.deducted_hours_balance ?? 0,
+    'Esnek Çalışma Notu': e.flexible_work_note || '',
+    'Raporlu': e.on_sick_leave ? 'Evet' : 'Hayır',
+    'Rapor Bitiş Tarihi': e.sick_leave_end_date || ''
+  }));
+
+  const leaveRows = [...state.allLeaveEntries]
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0))
+    .map(l => ({
+      'Ad Soyad': l.employee_name,
+      'Departman': l.department,
+      'Başlangıç Tarihi': l.start_date,
+      'Bitiş Tarihi': l.end_date,
+      'Gün Sayısı': l.start_date && l.end_date
+        ? Math.round((new Date(l.end_date) - new Date(l.start_date)) / 86400000) + 1
+        : '',
+      'Açıklama': l.note || ''
+    }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Çalışanlar');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaveRows), 'İzin Kayıtları');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  XLSX.writeFile(wb, `calisanlar_${dateStr}.xlsx`);
 }
 
 async function parseBulkFile(file) {
