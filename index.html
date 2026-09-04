@@ -47,9 +47,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore-compat.js"></script>
-<!-- CSV / Excel ayrıştırma (Toplu Ekleme için) -->
-<script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
-<script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- CSV / Excel ayrıştırma kütüphaneleri (papaparse, xlsx) burada YÜKLENMİYOR —
+     boyutları büyük olduğu için ilk açılışı yavaşlatmamaları adına sadece
+     Toplu Ekleme sayfası kullanıldığında JS tarafından dinamik olarak yükleniyor. -->
 <!-- İkonlar -->
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
 
@@ -110,7 +110,10 @@ function normalizeProfile(id, d) {
     flex_time_balance: d.flexTimeBalance ?? 0,
     deducted_hours_balance: d.deductedHoursBalance ?? 0,
     on_sick_leave: d.onSickLeave || false,
-    sick_leave_end_date: d.sickLeaveEndDate || null
+    sick_leave_end_date: d.sickLeaveEndDate || null,
+    annual_leave_start_date: d.annualLeaveStartDate || null,
+    annual_leave_end_date: d.annualLeaveEndDate || null,
+    annual_leave_note: d.annualLeaveNote || ''
   };
 }
 function normalizeAnnouncement(id, d) {
@@ -748,14 +751,18 @@ function employeeDashboardView() {
   </div>`;
 }
 
-function statCard(icon, label, value, hint, accent) {
+function statCard(icon, label, value, hint, accent, clickAction) {
   const accents = {
     pine: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300',
     gold: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
     brick: 'bg-brick-500/10 text-brick-600 dark:text-brick-500'
   };
+  const clickAttrs = clickAction
+    ? `data-action="${clickAction.action}" data-value="${escapeHtml(clickAction.value)}"`
+    : '';
+  const clickClass = clickAction ? 'cursor-pointer transition-colors hover:bg-sand-50 dark:hover:bg-ink-700/60' : '';
   return `
-  <div class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+  <div class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5 ${clickClass}" ${clickAttrs}>
     <div class="flex items-start justify-between">
       <div>
         <p class="text-xs font-medium text-ink-800/55 dark:text-sand-100/50">${label}</p>
@@ -1108,7 +1115,7 @@ function adminDashboardView() {
     <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Departmanlara Göre Çalışan Sayısı</h2>
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       ${deptEntries.map(([name, count], i) =>
-        statCard('users', name, count, `toplam ${total} çalışanın ${Math.round((count / total) * 100)}%'i`, deptAccentOrder[i % 3])
+        statCard('users', name, count, `toplam ${total} çalışanın ${Math.round((count / total) * 100)}%'i`, deptAccentOrder[i % 3], { action: 'show-department-employees', value: name })
       ).join('')}
     </div>
   </div>` : ''}
@@ -1181,10 +1188,16 @@ function panelSectionHtml(employees) {
 
   const sickLeave = employees.filter(e => e.on_sick_leave);
 
+  const today = new Date().toISOString().slice(0, 10);
+  const onLeaveToday = employees.filter(e =>
+    e.annual_leave_start_date && e.annual_leave_end_date &&
+    e.annual_leave_start_date <= today && today <= e.annual_leave_end_date
+  );
+
   return `
   <div class="mt-8">
     <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Çalışanlar</h2>
-    <div class="grid gap-4 lg:grid-cols-3">
+    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       ${miniEmployeePanel(
         'Yıllık İzni Azalanlar (0-5 gün)', 'palmtree', 'brick', lowLeave,
         'Yıllık izni 5 gün veya altına düşen çalışan yok.',
@@ -1199,6 +1212,11 @@ function panelSectionHtml(employees) {
         'Raporlu Çalışanlar', 'stethoscope', 'pine', sickLeave,
         'Şu an raporlu çalışan yok.',
         e => e.sick_leave_end_date ? e.sick_leave_end_date : '—'
+      )}
+      ${miniEmployeePanel(
+        'Bugün İzinli Olanlar', 'calendar-off', 'brick', onLeaveToday,
+        'Bugün yıllık izinde olan çalışan yok.',
+        e => e.annual_leave_end_date
       )}
     </div>
   </div>`;
@@ -1416,6 +1434,7 @@ function modalHtml() {
   if (state.modal.type === 'announcement') return announcementModal(state.modal.data);
   if (state.modal.type === 'periodic-check') return periodicCheckModal(state.modal.data);
   if (state.modal.type === 'bulk-password') return bulkPasswordModal();
+  if (state.modal.type === 'department-employees') return departmentEmployeesModal(state.modal.data);
   return '';
 }
 
@@ -1462,6 +1481,15 @@ function employeeModal(emp) {
           <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
         </div>
         ${isEdit ? `
+        <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
+          <p class="text-sm font-medium text-ink-800 dark:text-sand-100"><strong>Yıllık İzin Tarihi</strong> (opsiyonel)</p>
+          <div class="grid grid-cols-2 gap-4">
+            <div><label class="label">Başlangıç Tarihi</label><input name="annual_leave_start_date" type="date" class="input" value="${emp.annual_leave_start_date || ''}" /></div>
+            <div><label class="label">Bitiş Tarihi</label><input name="annual_leave_end_date" type="date" class="input" value="${emp.annual_leave_end_date || ''}" /></div>
+          </div>
+          <div><label class="label">Açıklama (opsiyonel)</label><input name="annual_leave_note" class="input" placeholder="Örn. yıllık izin, tatil vb." value="${escapeHtml(emp.annual_leave_note || '')}" /></div>
+          <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Bu tarih aralığı dolduğunda çalışan Genel Bakış'ta "Bugün İzinli Olanlar" listesinde otomatik görünür.</p>
+        </div>
         <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
           <label class="flex items-center gap-2.5">
             <input type="checkbox" name="on_sick_leave" id="on-sick-leave-checkbox" ${emp.on_sick_leave ? 'checked' : ''} class="h-4 w-4 rounded border-black/20 text-pine-600 focus:ring-pine-500" />
@@ -1597,6 +1625,56 @@ function bulkPasswordModal() {
   </div>`;
 }
 
+function departmentEmployeesModal(departmentName) {
+  const list = state.employees.filter(e => e.department === departmentName);
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <div>
+          <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(departmentName)}</h2>
+          <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${list.length} çalışan</p>
+        </div>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="px-6 py-5">
+        ${list.length === 0
+          ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Bu departmanda çalışan bulunamadı.</p>`
+          : `<div class="divide-y divide-black/5 dark:divide-white/5">
+              ${list.map(e => `
+                <div class="py-3.5">
+                  <div class="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+                      <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
+                    </div>
+                    ${e.on_sick_leave ? `<span class="rounded-full bg-brick-500/10 px-2.5 py-1 text-[11px] font-medium text-brick-600">Raporlu${e.sick_leave_end_date ? ' · ' + escapeHtml(e.sick_leave_end_date) : ''}</span>` : ''}
+                  </div>
+                  <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div>
+                      <p class="text-[11px] text-ink-800/45 dark:text-sand-100/40">Kalan İzin</p>
+                      <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} / ${e.annual_leave_total} gün</p>
+                    </div>
+                    <div>
+                      <p class="text-[11px] text-ink-800/45 dark:text-sand-100/40">Esnek Bakiye</p>
+                      <p class="text-sm font-semibold ${e.flex_time_balance < 0 ? 'text-brick-500' : 'text-ink-900 dark:text-sand-50'}">${fmtHours(e.flex_time_balance)}</p>
+                    </div>
+                    <div>
+                      <p class="text-[11px] text-ink-800/45 dark:text-sand-100/40">Kesilen Saat</p>
+                      <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${fmtHours(e.deducted_hours_balance)}</p>
+                    </div>
+                    <div class="col-span-2 sm:col-span-1">
+                      <p class="text-[11px] text-ink-800/45 dark:text-sand-100/40">Not</p>
+                      <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.flexible_work_note || '—')}</p>
+                    </div>
+                  </div>
+                </div>`).join('')}
+            </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* =====================================================================
    OLAY YÖNETİMİ (event delegation)
    ===================================================================== */
@@ -1678,6 +1756,10 @@ document.addEventListener('click', async (e) => {
       break;
     case 'open-bulk-password-form':
       state.modal = { type: 'bulk-password' };
+      render();
+      break;
+    case 'show-department-employees':
+      state.modal = { type: 'department-employees', data: el.dataset.value };
       render();
       break;
     case 'edit-periodic-check': {
@@ -1842,7 +1924,10 @@ document.addEventListener('submit', async (e) => {
           flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
           deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0,
           onSickLeave: fd.get('on_sick_leave') === 'on',
-          sickLeaveEndDate: fd.get('on_sick_leave') === 'on' ? (fd.get('sick_leave_end_date') || null) : null
+          sickLeaveEndDate: fd.get('on_sick_leave') === 'on' ? (fd.get('sick_leave_end_date') || null) : null,
+          annualLeaveStartDate: fd.get('annual_leave_start_date') || null,
+          annualLeaveEndDate: fd.get('annual_leave_end_date') || null,
+          annualLeaveNote: fd.get('annual_leave_note') || ''
         });
 
         const newPassword = fd.get('new_password');
@@ -2036,9 +2121,29 @@ document.addEventListener('drop', (e) => {
   }
 });
 
-function parseBulkFile(file) {
+// papaparse ve xlsx kütüphanelerini ilk kez ihtiyaç duyulduğunda yükler
+// (sayfa ilk açılırken indirilmezler, böylece giriş ekranı daha hızlı açılır).
+const _libLoadPromises = {};
+function loadScriptOnce(url) {
+  if (_libLoadPromises[url]) return _libLoadPromises[url];
+  _libLoadPromises[url] = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+  return _libLoadPromises[url];
+}
+async function ensureBulkImportLibs() {
+  if (!window.Papa) await loadScriptOnce('https://unpkg.com/papaparse@5.4.1/papaparse.min.js');
+  if (!window.XLSX) await loadScriptOnce('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js');
+}
+
+async function parseBulkFile(file) {
   state.bulkFileName = file.name;
   state.bulkResults = null;
+  await ensureBulkImportLibs();
   const isCsv = file.name.toLowerCase().endsWith('.csv');
   if (isCsv) {
     Papa.parse(file, {
