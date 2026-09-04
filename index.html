@@ -72,7 +72,6 @@
    AYARLAR — Firebase proje bilgilerinizi buraya girin
    (Firebase Console > Project Settings > General > Your apps > Web app > SDK setup and configuration)
    ===================================================================== */
-
 const firebaseConfig = {
   apiKey: "AIzaSyADpucVQrCF3C0GF1RgWY0pAbaxiMxjl9E",
   authDomain: "izin-portali.firebaseapp.com",
@@ -111,10 +110,7 @@ function normalizeProfile(id, d) {
     flex_time_balance: d.flexTimeBalance ?? 0,
     deducted_hours_balance: d.deductedHoursBalance ?? 0,
     on_sick_leave: d.onSickLeave || false,
-    sick_leave_end_date: d.sickLeaveEndDate || null,
-    annual_leave_start_date: d.annualLeaveStartDate || null,
-    annual_leave_end_date: d.annualLeaveEndDate || null,
-    annual_leave_note: d.annualLeaveNote || ''
+    sick_leave_end_date: d.sickLeaveEndDate || null
   };
 }
 function normalizeAnnouncement(id, d) {
@@ -197,6 +193,40 @@ async function loadMyPeriodicChecks(uid) {
     state.myPeriodicChecks = [];
   }
 }
+function normalizeLeaveEntry(id, d) {
+  return {
+    id,
+    employee_id: d.employeeId,
+    employee_name: d.employeeName,
+    department: d.department,
+    start_date: d.startDate,
+    end_date: d.endDate,
+    note: d.note || '',
+    created_at: d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt
+  };
+}
+async function loadAllLeaveEntries() {
+  try {
+    const snap = await db.collection('leaveEntries').get();
+    state.allLeaveEntries = snap.docs
+      .map(d => normalizeLeaveEntry(d.id, d.data()))
+      .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  } catch (err) {
+    console.error('İzin kayıtları alınamadı:', err.message);
+    state.allLeaveEntries = [];
+  }
+}
+async function loadMyLeaveEntries(uid) {
+  try {
+    const snap = await db.collection('leaveEntries').where('employeeId', '==', uid).get();
+    state.myLeaveEntries = snap.docs
+      .map(d => normalizeLeaveEntry(d.id, d.data()))
+      .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  } catch (err) {
+    console.error('İzin kayıtları alınamadı:', err.message);
+    state.myLeaveEntries = [];
+  }
+}
 async function callFunction(name, body) {
   const idToken = await fbAuth.currentUser.getIdToken();
   const res = await fetch(`${FUNCTIONS_BASE}/api/${name}`, {
@@ -231,7 +261,9 @@ const state = {
   reportFormError: '',
   adminReportFilter: 'hepsi',
   periodicChecks: [],
-  myPeriodicChecks: []
+  myPeriodicChecks: [],
+  allLeaveEntries: [],
+  myLeaveEntries: []
 };
 
 /* =====================================================================
@@ -446,16 +478,16 @@ async function render() {
   if (route === '#/dashboard') {
     title = `Merhaba, ${escapeHtml(state.profile.first_name)} 👋`;
     subtitle = `${escapeHtml(state.profile.department)} · Sicil No: ${escapeHtml(state.profile.registry_number || '—')}`;
-    await Promise.all([loadAnnouncements(), loadMyPeriodicChecks(state.profile.id)]);
+    await Promise.all([loadAnnouncements(), loadMyPeriodicChecks(state.profile.id), loadMyLeaveEntries(state.profile.id)]);
     content = employeeDashboardView();
   } else if (route === '#/admin') {
     title = 'Genel Bakış';
     subtitle = 'Yönetici Paneli';
-    await Promise.all([loadEmployees(), loadAnnouncements()]);
+    await Promise.all([loadEmployees(), loadAnnouncements(), loadAllLeaveEntries()]);
     content = adminDashboardView();
   } else if (route === '#/admin/employees') {
     title = 'Çalışanlar';
-    await loadEmployees();
+    await Promise.all([loadEmployees(), loadAllLeaveEntries()]);
     subtitle = `${state.employees.length} kayıtlı çalışan`;
     content = adminEmployeesView();
   } else if (route === '#/admin/import') {
@@ -718,30 +750,23 @@ function employeeDashboardView() {
     </div>
   </div>
 
-  ${p.annual_leave_start_date && p.annual_leave_end_date ? `
+  ${state.myLeaveEntries.length > 0 ? `
   <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <div class="flex items-center gap-3">
       <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
         <i data-lucide="calendar-days" class="w-[18px] h-[18px]"></i>
       </div>
       <div>
-        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yıllık İzin Tarihiniz</h2>
-        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Yöneticiniz tarafından planlanan izin döneminiz</p>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">İzin Tarihlerim</h2>
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Yöneticiniz tarafından planlanan izin dönemleriniz (geçmiş ve gelecek)</p>
       </div>
     </div>
-    <div class="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3">
-      <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
-        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Başlangıç</p>
-        <p class="mt-1 font-display text-lg font-bold text-pine-700 dark:text-gold-400">${escapeHtml(p.annual_leave_start_date)}</p>
-      </div>
-      <div class="rounded-lg bg-sand-50 dark:bg-ink-900 p-4 text-center">
-        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Bitiş</p>
-        <p class="mt-1 font-display text-lg font-bold text-pine-700 dark:text-gold-400">${escapeHtml(p.annual_leave_end_date)}</p>
-      </div>
-      <div class="col-span-2 rounded-lg bg-sand-50 dark:bg-ink-900 p-4 sm:col-span-1">
-        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Açıklama</p>
-        <p class="mt-1 text-sm font-medium">${escapeHtml(p.annual_leave_note || '—')}</p>
-      </div>
+    <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+      ${state.myLeaveEntries.map(l => `
+        <div class="py-3">
+          <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+          ${l.note ? `<p class="mt-0.5 text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
+        </div>`).join('')}
     </div>
   </div>` : ''}
 
@@ -1173,12 +1198,13 @@ function adminDashboardView() {
   ${panelSectionHtml(employees)}`;
 }
 
-function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn) {
+function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn, nameFn) {
   const accents = {
     pine: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300',
     gold: 'bg-gold-500/10 text-gold-600 dark:text-gold-400',
     brick: 'bg-brick-500/10 text-brick-600 dark:text-brick-500'
   };
+  const getName = nameFn || (e => `${e.first_name} ${e.last_name}`);
   return `
   <div class="card p-5 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <div class="flex items-center gap-2.5">
@@ -1193,7 +1219,7 @@ function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn) {
           ${items.map(e => `
             <div class="flex items-center justify-between gap-2 py-2">
               <div class="min-w-0">
-                <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+                <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(getName(e))}</p>
                 <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(e.department || '')}</p>
               </div>
               <span class="shrink-0 text-xs font-semibold text-ink-800/70 dark:text-sand-100/60">${valueFn(e)}</span>
@@ -1217,9 +1243,8 @@ function panelSectionHtml(employees) {
   const sickLeave = employees.filter(e => e.on_sick_leave);
 
   const today = new Date().toISOString().slice(0, 10);
-  const onLeaveToday = employees.filter(e =>
-    e.annual_leave_start_date && e.annual_leave_end_date &&
-    e.annual_leave_start_date <= today && today <= e.annual_leave_end_date
+  const onLeaveToday = state.allLeaveEntries.filter(l =>
+    l.start_date && l.end_date && l.start_date <= today && today <= l.end_date
   );
 
   return `
@@ -1244,7 +1269,8 @@ function panelSectionHtml(employees) {
       ${miniEmployeePanel(
         'Bugün İzinli Olanlar', 'calendar-off', 'brick', onLeaveToday,
         'Bugün yıllık izinde olan çalışan yok.',
-        e => e.annual_leave_end_date
+        l => l.end_date,
+        l => l.employee_name
       )}
     </div>
   </div>`;
@@ -1270,6 +1296,9 @@ function adminEmployeesView() {
       <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
       <td class="px-5 py-3.5">
         <div class="flex justify-end gap-1">
+          <button data-action="open-leave-history" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="İzin Kayıtları">
+            <i data-lucide="calendar-days" class="w-[15px] h-[15px]"></i>
+          </button>
           <button data-action="edit-employee" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
             <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
           </button>
@@ -1463,6 +1492,7 @@ function modalHtml() {
   if (state.modal.type === 'periodic-check') return periodicCheckModal(state.modal.data);
   if (state.modal.type === 'bulk-password') return bulkPasswordModal();
   if (state.modal.type === 'department-employees') return departmentEmployeesModal(state.modal.data);
+  if (state.modal.type === 'leave-history') return leaveHistoryModal(state.modal.data);
   return '';
 }
 
@@ -1509,15 +1539,6 @@ function employeeModal(emp) {
           <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
         </div>
         ${isEdit ? `
-        <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
-          <p class="text-sm font-medium text-ink-800 dark:text-sand-100"><strong>Yıllık İzin Tarihi</strong> (opsiyonel)</p>
-          <div class="grid grid-cols-2 gap-4">
-            <div><label class="label">Başlangıç Tarihi</label><input name="annual_leave_start_date" type="date" class="input" value="${emp.annual_leave_start_date || ''}" /></div>
-            <div><label class="label">Bitiş Tarihi</label><input name="annual_leave_end_date" type="date" class="input" value="${emp.annual_leave_end_date || ''}" /></div>
-          </div>
-          <div><label class="label">Açıklama (opsiyonel)</label><input name="annual_leave_note" class="input" placeholder="Örn. yıllık izin, tatil vb." value="${escapeHtml(emp.annual_leave_note || '')}" /></div>
-          <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Bu tarih aralığı dolduğunda çalışan Genel Bakış'ta "Bugün İzinli Olanlar" listesinde otomatik görünür.</p>
-        </div>
         <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
           <label class="flex items-center gap-2.5">
             <input type="checkbox" name="on_sick_leave" id="on-sick-leave-checkbox" ${emp.on_sick_leave ? 'checked' : ''} class="h-4 w-4 rounded border-black/20 text-pine-600 focus:ring-pine-500" />
@@ -1703,6 +1724,58 @@ function departmentEmployeesModal(departmentName) {
   </div>`;
 }
 
+function leaveHistoryModal(employeeId) {
+  const emp = state.employees.find(x => x.id === employeeId);
+  if (!emp) return '';
+  const entries = state.allLeaveEntries
+    .filter(l => l.employee_id === employeeId)
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <div>
+          <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">İzin Kayıtları</h2>
+          <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(emp.first_name)} ${escapeHtml(emp.last_name)} · ${escapeHtml(emp.department)}</p>
+        </div>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <form id="leave-entry-form" data-employee-id="${employeeId}" class="space-y-4 px-6 py-5 border-b border-black/5 dark:border-white/5">
+        <p class="text-sm font-medium text-ink-800 dark:text-sand-100">Yeni İzin Dönemi Ekle</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Başlangıç Tarihi</label><input name="start_date" type="date" required class="input" /></div>
+          <div><label class="label">Bitiş Tarihi</label><input name="end_date" type="date" required class="input" /></div>
+        </div>
+        <div><label class="label">Açıklama (opsiyonel)</label><input name="note" class="input" placeholder="Örn. yıllık izin, tatil vb." /></div>
+        <div id="leave-entry-form-error"></div>
+        <button type="submit" id="leave-entry-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+          <i data-lucide="plus" class="w-4 h-4"></i> Ekle
+        </button>
+      </form>
+
+      <div class="px-6 py-5">
+        <p class="mb-3 text-sm font-medium text-ink-800 dark:text-sand-100">Geçmiş ve Gelecek İzinler</p>
+        ${entries.length === 0
+          ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Henüz izin kaydı yok.</p>`
+          : `<div class="divide-y divide-black/5 dark:divide-white/5">
+              ${entries.map(l => `
+                <div class="flex items-center justify-between gap-3 py-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+                    ${l.note ? `<p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
+                  </div>
+                  <button data-action="delete-leave-entry" data-id="${l.id}" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+                    <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+                  </button>
+                </div>`).join('')}
+            </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
 /* =====================================================================
    OLAY YÖNETİMİ (event delegation)
    ===================================================================== */
@@ -1790,6 +1863,20 @@ document.addEventListener('click', async (e) => {
       state.modal = { type: 'department-employees', data: el.dataset.value };
       render();
       break;
+    case 'open-leave-history':
+      state.modal = { type: 'leave-history', data: el.dataset.id };
+      render();
+      break;
+    case 'delete-leave-entry': {
+      if (confirm('Bu izin kaydını silmek istediğinize emin misiniz?')) {
+        const currentEmployeeId = state.modal?.data;
+        await db.collection('leaveEntries').doc(el.dataset.id).delete();
+        await loadAllLeaveEntries();
+        state.modal = { type: 'leave-history', data: currentEmployeeId };
+        render();
+      }
+      break;
+    }
     case 'edit-periodic-check': {
       const check = state.periodicChecks.find(x => x.id === el.dataset.id);
       state.modal = { type: 'periodic-check', data: check };
@@ -1952,10 +2039,7 @@ document.addEventListener('submit', async (e) => {
           flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
           deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0,
           onSickLeave: fd.get('on_sick_leave') === 'on',
-          sickLeaveEndDate: fd.get('on_sick_leave') === 'on' ? (fd.get('sick_leave_end_date') || null) : null,
-          annualLeaveStartDate: fd.get('annual_leave_start_date') || null,
-          annualLeaveEndDate: fd.get('annual_leave_end_date') || null,
-          annualLeaveNote: fd.get('annual_leave_note') || ''
+          sickLeaveEndDate: fd.get('on_sick_leave') === 'on' ? (fd.get('sick_leave_end_date') || null) : null
         });
 
         const newPassword = fd.get('new_password');
@@ -2073,6 +2157,44 @@ document.addEventListener('submit', async (e) => {
     } catch (err) {
       errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
       btn.disabled = false; btn.textContent = id ? 'Değişiklikleri Kaydet' : 'Kontrolü Ekle';
+    }
+    return;
+  }
+
+  if (e.target.id === 'leave-entry-form') {
+    e.preventDefault();
+    const form = e.target;
+    const employeeId = form.dataset.employeeId;
+    const fd = new FormData(form);
+    const btn = document.getElementById('leave-entry-form-submit');
+    const errBox = document.getElementById('leave-entry-form-error');
+    errBox.innerHTML = '';
+
+    const startDate = fd.get('start_date');
+    const endDate = fd.get('end_date');
+    if (startDate > endDate) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Bitiş tarihi başlangıçtan önce olamaz.</p>`;
+      return;
+    }
+
+    const emp = state.employees.find(x => x.id === employeeId);
+    btn.disabled = true; btn.textContent = 'Ekleniyor…';
+    try {
+      await db.collection('leaveEntries').add({
+        employeeId,
+        employeeName: `${emp.first_name} ${emp.last_name}`,
+        department: emp.department,
+        startDate,
+        endDate,
+        note: fd.get('note') || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await loadAllLeaveEntries();
+      state.modal = { type: 'leave-history', data: employeeId };
+      render();
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
+      btn.disabled = false; btn.textContent = 'Ekle';
     }
     return;
   }
