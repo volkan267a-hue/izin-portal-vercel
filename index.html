@@ -267,7 +267,11 @@ const state = {
   bulkLeaveRows: [],
   bulkLeaveFileName: '',
   bulkLeaveResults: null,
-  bulkLeaveSubmitting: false
+  bulkLeaveSubmitting: false,
+  bulkUpdateRows: [],
+  bulkUpdateFileName: '',
+  bulkUpdateResults: null,
+  bulkUpdateSubmitting: false
 };
 
 /* =====================================================================
@@ -1327,6 +1331,9 @@ function adminEmployeesView() {
       <button data-action="open-bulk-leave-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
         <i data-lucide="calendar-plus" class="w-4 h-4"></i> Toplu İzin Girişi
       </button>
+      <button data-action="open-bulk-update-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="refresh-cw" class="w-4 h-4"></i> Toplu Güncelleme
+      </button>
       <button data-action="open-bulk-password-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
         <i data-lucide="key-round" class="w-4 h-4"></i> Tüm Şifreleri Aynı Yap
       </button>
@@ -1504,6 +1511,7 @@ function modalHtml() {
   if (state.modal.type === 'department-employees') return departmentEmployeesModal(state.modal.data);
   if (state.modal.type === 'leave-history') return leaveHistoryModal(state.modal.data);
   if (state.modal.type === 'bulk-leave') return bulkLeaveModal();
+  if (state.modal.type === 'bulk-update') return bulkUpdateModal();
   return '';
 }
 
@@ -1877,9 +1885,77 @@ function bulkLeaveModal() {
   </div>`;
 }
 
-/* =====================================================================
-   OLAY YÖNETİMİ (event delegation)
-   ===================================================================== */
+function bulkUpdateModal() {
+  const rows = state.bulkUpdateRows;
+
+  const results = state.bulkUpdateResults ? `
+    <div class="mt-4 space-y-1.5">
+      <p class="text-sm font-medium text-ink-900 dark:text-sand-50">Sonuçlar</p>
+      ${state.bulkUpdateResults.map(r => `
+        <div class="flex items-center gap-2 rounded-lg bg-sand-50 dark:bg-ink-900 px-3 py-2 text-xs">
+          <i data-lucide="${r.success ? 'check-circle-2' : 'x-circle'}" class="w-[14px] h-[14px] shrink-0 ${r.success ? 'text-pine-600 dark:text-pine-400' : 'text-brick-500'}"></i>
+          <span class="text-ink-800 dark:text-sand-100">${escapeHtml(r.name)}</span>
+          ${!r.success ? `<span class="text-brick-500">— ${escapeHtml(r.error)}</span>` : ''}
+        </div>`).join('')}
+    </div>` : '';
+
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">Toplu Güncelleme</h2>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      <div class="px-6 py-5">
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">
+          Sicil numarasına göre eşleştirilir; sadece <strong>Esnek Bakiye</strong> ve <strong>Kalan Yıllık İzin</strong> güncellenir, başka hiçbir alana dokunulmaz.
+        </p>
+        <div id="bulk-update-dropzone" class="mt-3 flex cursor-pointer flex-col items-center justify-center rounded-xl2 border-2 border-dashed border-pine-300 dark:border-pine-700 bg-pine-50/40 dark:bg-pine-900/10 px-6 py-6 text-center transition hover:bg-pine-50 dark:hover:bg-pine-900/20">
+          <i data-lucide="upload-cloud" class="w-6 h-6 text-pine-600 dark:text-pine-400"></i>
+          <p class="mt-2 text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(state.bulkUpdateFileName) || 'Excel/CSV dosyası yükleyin'}</p>
+          <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Kolonlar: registry_number (Pers.no), flex_balance (Es.B), remaining_leave (YI)</p>
+          <input id="bulk-update-file-input" type="file" accept=".csv,.xlsx,.xls" class="hidden" />
+        </div>
+        <div class="mt-2 flex justify-end">
+          <button data-action="download-update-template" class="text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline inline-flex items-center gap-1">
+            <i data-lucide="download" class="w-3 h-3"></i> Şablon İndir (.csv)
+          </button>
+        </div>
+
+        ${rows.length > 0 ? `
+        <div class="mt-4 max-h-72 overflow-auto rounded-lg border border-black/5 dark:border-white/5">
+          <table class="w-full min-w-[520px] text-left text-xs">
+            <thead class="bg-sand-50 dark:bg-ink-900 sticky top-0"><tr class="text-ink-800/50 dark:text-sand-100/45">
+              <th class="px-3 py-2 font-medium">Sicil No</th>
+              <th class="px-3 py-2 font-medium">Çalışan</th>
+              <th class="px-3 py-2 font-medium">Yeni Esnek Bakiye</th>
+              <th class="px-3 py-2 font-medium">Yeni Kalan İzin</th>
+            </tr></thead>
+            <tbody class="divide-y divide-black/5 dark:divide-white/5">
+              ${rows.map(r => `<tr>
+                <td class="px-3 py-2">${escapeHtml(r.registryNumber)}</td>
+                <td class="px-3 py-2 ${!r.employeeId ? 'text-brick-500' : ''}">${escapeHtml(r.employeeLabel)}</td>
+                <td class="px-3 py-2">${r.flexBalance !== null ? fmtHours(r.flexBalance) : '—'}</td>
+                <td class="px-3 py-2">${r.remainingLeave !== null ? r.remainingLeave + ' gün' : '—'}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+        ` : ''}
+
+        ${results}
+        <div id="bulk-update-error"></div>
+
+        <div class="mt-5 flex justify-end gap-3">
+          <button data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Kapat</button>
+          <button data-action="submit-bulk-update" ${state.bulkUpdateSubmitting || rows.length === 0 ? 'disabled' : ''} class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700 disabled:opacity-50">
+            ${state.bulkUpdateSubmitting ? 'Güncelleniyor…' : 'Tümünü Güncelle'}
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-action]');
 
@@ -1930,6 +2006,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'download-template': downloadTemplate(); break;
     case 'download-leave-template': downloadLeaveTemplate(); break;
+    case 'download-update-template': downloadUpdateTemplate(); break;
     case 'import-bulk': await handleBulkImport(); break;
     case 'add-bulk-row':
       state.bulkRows = [...state.bulkRows, {
@@ -2010,6 +2087,50 @@ document.addEventListener('click', async (e) => {
       state.bulkLeaveResults = results;
       state.bulkLeaveRows = [];
       state.bulkLeaveSubmitting = false;
+      render();
+      break;
+    }
+    case 'open-bulk-update-form':
+      state.bulkUpdateResults = null;
+      state.bulkUpdateRows = [];
+      state.bulkUpdateFileName = '';
+      state.modal = { type: 'bulk-update' };
+      render();
+      break;
+    case 'submit-bulk-update': {
+      const errBox = document.getElementById('bulk-update-error');
+      if (errBox) errBox.innerHTML = '';
+      const unmatched = state.bulkUpdateRows.filter(r => !r.employeeId);
+      if (unmatched.length > 0) {
+        if (errBox) errBox.innerHTML = `<p class="mt-3 rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${unmatched.length} satırda sicil numarası eşleşmedi. Devam etmeden önce dosyanızı kontrol edin (bu satırlar atlanacak).</p>`;
+      }
+      state.bulkUpdateSubmitting = true;
+      render();
+      const results = [];
+      for (const row of state.bulkUpdateRows) {
+        if (!row.employeeId) {
+          results.push({ name: `Sicil No ${row.registryNumber}`, success: false, error: 'Eşleşen çalışan bulunamadı' });
+          continue;
+        }
+        const emp = state.employees.find(x => x.id === row.employeeId);
+        try {
+          const payload = {};
+          if (row.flexBalance !== null) payload.flexTimeBalance = row.flexBalance;
+          if (row.remainingLeave !== null) {
+            payload.annualLeaveUsed = Math.max(emp.annual_leave_total - row.remainingLeave, 0);
+          }
+          if (Object.keys(payload).length > 0) {
+            await db.collection('profiles').doc(row.employeeId).update(payload);
+          }
+          results.push({ name: `${emp.first_name} ${emp.last_name}`, success: true });
+        } catch (err) {
+          results.push({ name: `${emp.first_name} ${emp.last_name}`, success: false, error: err.message || 'Bilinmeyen hata' });
+        }
+      }
+      await loadEmployees();
+      state.bulkUpdateResults = results;
+      state.bulkUpdateRows = [];
+      state.bulkUpdateSubmitting = false;
       render();
       break;
     }
@@ -2408,6 +2529,10 @@ document.addEventListener('click', (e) => {
     const input = document.getElementById('bulk-leave-file-input');
     if (input) input.click();
   }
+  if (e.target.closest('#bulk-update-dropzone')) {
+    const input = document.getElementById('bulk-update-file-input');
+    if (input) input.click();
+  }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-file-input') {
@@ -2417,6 +2542,10 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-leave-file-input') {
     const file = e.target.files?.[0];
     if (file) parseBulkLeaveFile(file);
+  }
+  if (e.target.id === 'bulk-update-file-input') {
+    const file = e.target.files?.[0];
+    if (file) parseBulkUpdateFile(file);
   }
   if (e.target.id === 'report-photo-input') {
     const file = e.target.files?.[0];
@@ -2434,6 +2563,7 @@ document.addEventListener('change', (e) => {
 document.addEventListener('dragover', (e) => {
   if (e.target.closest('#dropzone')) e.preventDefault();
   if (e.target.closest('#bulk-leave-dropzone')) e.preventDefault();
+  if (e.target.closest('#bulk-update-dropzone')) e.preventDefault();
 });
 document.addEventListener('drop', (e) => {
   const dz = e.target.closest('#dropzone');
@@ -2447,6 +2577,12 @@ document.addEventListener('drop', (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) parseBulkLeaveFile(file);
+  }
+  const updateDz = e.target.closest('#bulk-update-dropzone');
+  if (updateDz) {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) parseBulkUpdateFile(file);
   }
 });
 
@@ -2597,6 +2733,73 @@ function downloadLeaveTemplate() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = 'izin_sablonu.csv'; a.click();
+  URL.revokeObjectURL(url);
+}
+
+const UPDATE_COLUMN_MAP = {
+  registry_number: ['registry_number', 'sicil_no', 'sicil no', 'sicil', 'pers.no', 'pers no', 'persno', 'pers.n', 'pers n'],
+  flex_balance: ['flex_balance', 'es.b', 'esb', 'esnek_bakiye', 'esnek bakiye'],
+  remaining_leave: ['remaining_leave', 'yi', 'yıllık izin', 'yillik izin', 'kalan izin', 'kalan_izin']
+};
+function mapUpdateRow(rawRow) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(rawRow)) normalized[normalizeKey(key)] = value;
+  const mapped = {};
+  for (const [field, aliases] of Object.entries(UPDATE_COLUMN_MAP)) {
+    const foundKey = aliases.map(normalizeKey).find(a => a in normalized);
+    if (foundKey) mapped[field] = normalized[foundKey];
+  }
+  return mapped;
+}
+function parseDecimal(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const num = parseFloat(String(value).replace(',', '.'));
+  return isNaN(num) ? null : num;
+}
+async function parseBulkUpdateFile(file) {
+  state.bulkUpdateFileName = file.name;
+  state.bulkUpdateResults = null;
+  await ensureBulkImportLibs();
+
+  const toRows = (rawRows) => {
+    const mapped = rawRows.map(mapUpdateRow).filter(r => r.registry_number);
+    return mapped.map(r => {
+      const emp = state.employees.find(e => String(e.registry_number).trim() === String(r.registry_number).trim());
+      const remainingParsed = parseDecimal(r.remaining_leave);
+      return {
+        registryNumber: r.registry_number,
+        employeeId: emp ? emp.id : '',
+        employeeLabel: emp ? `${emp.first_name} ${emp.last_name}` : 'Eşleşen çalışan bulunamadı',
+        flexBalance: parseDecimal(r.flex_balance),
+        remainingLeave: remainingParsed !== null ? Math.round(remainingParsed) : null
+      };
+    });
+  };
+
+  const isCsv = file.name.toLowerCase().endsWith('.csv');
+  if (isCsv) {
+    Papa.parse(file, {
+      header: true, skipEmptyLines: true,
+      complete: (res) => { state.bulkUpdateRows = toRows(res.data); render(); }
+    });
+  } else {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const wb = XLSX.read(ev.target.result, { type: 'binary' });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet);
+      state.bulkUpdateRows = toRows(json);
+      render();
+    };
+    reader.readAsBinaryString(file);
+  }
+}
+function downloadUpdateTemplate() {
+  const csv = 'registry_number,flex_balance,remaining_leave\n1024,-2.5,9\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'guncelleme_sablonu.csv'; a.click();
   URL.revokeObjectURL(url);
 }
 
