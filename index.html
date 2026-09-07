@@ -1546,8 +1546,8 @@ function employeeModal(emp) {
         </div>
         <div><label class="label">Esnek Çalışma Notu</label><input name="flexible_work_note" class="input" value="${isEdit ? escapeHtml(emp.flexible_work_note || '') : 'Standart mesai'}" /></div>
         <div class="grid grid-cols-2 gap-4">
-          <div><label class="label">Esnek Bakiye (örn. -7,5)</label><input name="flex_time_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.flex_time_balance ?? 0) : 0}" /></div>
-          <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="0.5" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
+          <div><label class="label">Esnek Bakiye (örn. -7,5)</label><input name="flex_time_balance" type="number" step="any" class="input" value="${isEdit ? (emp.flex_time_balance ?? 0) : 0}" /></div>
+          <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="any" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
         </div>
         ${isEdit ? `
         <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
