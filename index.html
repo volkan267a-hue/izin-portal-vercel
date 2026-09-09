@@ -35,7 +35,7 @@
           ink: { 900: '#101715', 800: '#16201d', 700: '#1e2b27' }
         },
         boxShadow: {
-          soft: '0 1px 2px rgba(16,23,21,0.06), 0 8px 24px -12px rgba(16,23,21,0.18)'
+          soft: '0 1px 2px rgba(16,23,21,0.06), 0 16px 32px -14px rgba(16,23,21,0.22)'
         },
         borderRadius: { xl2: '1.1rem' }
       }
@@ -58,9 +58,53 @@
   body { font-family: 'Inter', system-ui, sans-serif; }
   ::selection { background: #adcdc4; color: #122f2a; }
   *:focus-visible { outline: 2px solid #205c52; outline-offset: 2px; }
-  .card { }
   .modal-backdrop { background: rgba(0,0,0,0.4); }
   [data-lucide] { display: inline-block; }
+
+  /* --- Premium görsel incelikler --- */
+  .card {
+    box-shadow: 0 1px 2px rgba(18,47,42,.05), 0 14px 30px -16px rgba(18,47,42,.22);
+    transition: box-shadow .2s ease, transform .2s ease;
+  }
+  .dark .card {
+    box-shadow: 0 1px 2px rgba(0,0,0,.3), 0 14px 30px -16px rgba(0,0,0,.6);
+  }
+  .card[data-action]:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(18,47,42,.08), 0 20px 34px -14px rgba(18,47,42,.28);
+  }
+  .dark .card[data-action]:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,.35), 0 20px 34px -14px rgba(0,0,0,.65);
+  }
+
+  .btn-primary, .btn-secondary, .btn-danger {
+    transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+  }
+  .btn-primary {
+    box-shadow: 0 1px 2px rgba(18,47,42,.18), 0 8px 18px -8px rgba(32,92,82,.5);
+  }
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.06);
+    box-shadow: 0 2px 4px rgba(18,47,42,.2), 0 12px 24px -8px rgba(32,92,82,.55);
+  }
+  .btn-primary:active { transform: translateY(0); filter: brightness(.98); }
+  .btn-secondary:hover { transform: translateY(-1px); }
+
+  .font-display { letter-spacing: -0.012em; }
+
+  /* İnce, zarif kaydırma çubuğu */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(32,92,82,.25); border-radius: 999px; }
+  .dark ::-webkit-scrollbar-thumb { background: rgba(234,223,200,.15); }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(32,92,82,.4); }
+
+  /* Sidebar ve giriş vitrini için ince nokta deseni */
+  .premium-texture {
+    background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px);
+    background-size: 18px 18px;
+  }
 </style>
 </head>
 <body class="bg-sand-50 dark:bg-ink-900 text-ink-900 dark:text-sand-100 transition-colors">
@@ -572,10 +616,10 @@ function shell(title, subtitle, content, role, route) {
   return `
   <div class="flex min-h-screen bg-sand-50 dark:bg-ink-900">
     ${state.sidebarOpen ? `<div class="fixed inset-0 z-30 bg-black/30 lg:hidden" data-action="close-sidebar"></div>` : ''}
-    <aside class="fixed z-40 inset-y-0 left-0 w-64 shrink-0 transform bg-pine-900 text-sand-100 transition-transform duration-200 lg:static lg:translate-x-0 ${state.sidebarOpen ? 'translate-x-0' : '-translate-x-full'}">
+    <aside class="premium-texture fixed z-40 inset-y-0 left-0 w-64 shrink-0 transform bg-gradient-to-b from-pine-800 via-pine-900 to-pine-950 text-sand-100 shadow-[4px_0_24px_-8px_rgba(0,0,0,0.4)] transition-transform duration-200 lg:static lg:translate-x-0 ${state.sidebarOpen ? 'translate-x-0' : '-translate-x-full'}">
       <div class="flex h-16 items-center justify-between px-5 border-b border-white/10">
         <div class="flex items-center gap-2.5">
-          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-gold-500 text-pine-950"><i data-lucide="user-round" class="w-[18px] h-[18px]"></i></div>
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-gold-400 to-gold-600 text-pine-950 shadow-[0_2px_6px_rgba(0,0,0,0.35)]"><i data-lucide="user-round" class="w-[18px] h-[18px]"></i></div>
           <span class="font-display font-semibold text-[15px] tracking-tight">İzin Portalı</span>
         </div>
         <button class="lg:hidden text-sand-100/70" data-action="close-sidebar" aria-label="Kapat">
@@ -634,9 +678,9 @@ function loginScreen() {
   return `
   <div class="flex min-h-screen items-center justify-center bg-sand-50 dark:bg-ink-900 px-4">
     <div class="grid w-full max-w-4xl overflow-hidden rounded-xl2 shadow-soft lg:grid-cols-2">
-      <div class="hidden flex-col justify-between bg-pine-900 p-10 text-sand-100 lg:flex">
+      <div class="premium-texture hidden flex-col justify-between bg-gradient-to-br from-pine-700 via-pine-900 to-pine-950 p-10 text-sand-100 lg:flex">
         <div class="flex items-center gap-2.5">
-          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gold-500 text-pine-950"><i data-lucide="user-round" class="w-5 h-5"></i></div>
+          <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-gold-400 to-gold-600 text-pine-950 shadow-[0_2px_6px_rgba(0,0,0,0.35)]"><i data-lucide="user-round" class="w-5 h-5"></i></div>
           <span class="font-display font-semibold tracking-tight">İzin Portalı</span>
         </div>
         <div>
@@ -1139,6 +1183,41 @@ function periodicCheckRow(c) {
 /* =====================================================================
    ADMIN — GENEL BAKIŞ
    ===================================================================== */
+function flexBalanceChartHtml(employees) {
+  const sorted = [...employees].sort((a, b) => (a.flex_time_balance ?? 0) - (b.flex_time_balance ?? 0));
+  const maxAbs = Math.max(...sorted.map(e => Math.abs(e.flex_time_balance ?? 0)), 1);
+
+  const rows = sorted.map(e => {
+    const val = e.flex_time_balance ?? 0;
+    const pct = Math.min((Math.abs(val) / maxAbs) * 50, 50);
+    const bar = val < 0
+      ? `<div class="absolute top-0 h-full rounded-l bg-brick-500" style="right:50%; width:${pct}%"></div>`
+      : val > 0
+        ? `<div class="absolute top-0 h-full rounded-r bg-pine-500" style="left:50%; width:${pct}%"></div>`
+        : '';
+    return `
+    <div class="flex items-center gap-3 py-1.5">
+      <p class="w-32 shrink-0 truncate text-xs text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+      <div class="relative h-3.5 flex-1 min-w-0">
+        <div class="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/10 dark:bg-white/10"></div>
+        ${bar}
+      </div>
+      <p class="w-16 shrink-0 text-right text-xs font-semibold ${val < 0 ? 'text-brick-500' : 'text-ink-800/70 dark:text-sand-100/60'}">${fmtHours(val)}</p>
+    </div>`;
+  }).join('');
+
+  return `
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Bakiye Dağılımı</h2>
+    <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Tüm çalışanların esnek bakiyesi — sıfır çizgisinin solu borç, sağı alacak</p>
+    <div class="mt-4 max-h-[480px] overflow-y-auto">
+      ${sorted.length === 0
+        ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Henüz çalışan verisi yok.</p>`
+        : rows}
+    </div>
+  </div>`;
+}
+
 function adminDashboardView() {
   const employees = state.employees;
   const total = employees.length;
@@ -1203,7 +1282,8 @@ function adminDashboardView() {
         </div>`}
   </div>
 
-  ${panelSectionHtml(employees)}`;
+  ${panelSectionHtml(employees)}
+  ${flexBalanceChartHtml(employees)}`;
 }
 
 function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn, nameFn) {
