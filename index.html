@@ -315,7 +315,8 @@ const state = {
   bulkUpdateRows: [],
   bulkUpdateFileName: '',
   bulkUpdateResults: null,
-  bulkUpdateSubmitting: false
+  bulkUpdateSubmitting: false,
+  flexChartFilter: 'hepsi'
 };
 
 /* =====================================================================
@@ -1183,7 +1184,19 @@ function periodicCheckRow(c) {
 /* =====================================================================
    ADMIN — GENEL BAKIŞ
    ===================================================================== */
-function flexBalanceChartHtml(employees) {
+function flexBalanceChartHtml(allEmployees) {
+  const departments = [...new Set(allEmployees.map(e => e.department).filter(Boolean))].sort();
+  const filter = state.flexChartFilter;
+  const employees = filter === 'hepsi' ? allEmployees : allEmployees.filter(e => e.department === filter);
+
+  const filterBtn = (value, label) => `
+    <button data-action="filter-flex-chart" data-value="${escapeHtml(value)}"
+      class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+        filter === value
+          ? 'bg-pine-600 text-white'
+          : 'bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100'
+      }">${label}</button>`;
+
   const sorted = [...employees].sort((a, b) => (a.flex_time_balance ?? 0) - (b.flex_time_balance ?? 0));
   const maxAbs = Math.max(...sorted.map(e => Math.abs(e.flex_time_balance ?? 0)), 1);
 
@@ -1209,10 +1222,14 @@ function flexBalanceChartHtml(employees) {
   return `
   <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Bakiye Dağılımı</h2>
-    <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Tüm çalışanların esnek bakiyesi — sıfır çizgisinin solu borç, sağı alacak</p>
+    <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Sıfır çizgisinin solu borç, sağı alacak</p>
+    <div class="mt-4 flex flex-wrap gap-2">
+      ${filterBtn('hepsi', 'Hepsi')}
+      ${departments.map(d => filterBtn(d, d)).join('')}
+    </div>
     <div class="mt-4 max-h-[480px] overflow-y-auto">
       ${sorted.length === 0
-        ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Henüz çalışan verisi yok.</p>`
+        ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Bu filtrede çalışan yok.</p>`
         : rows}
     </div>
   </div>`;
@@ -2108,6 +2125,10 @@ document.addEventListener('click', async (e) => {
     }
     case 'filter-reports':
       state.adminReportFilter = el.dataset.value;
+      render();
+      break;
+    case 'filter-flex-chart':
+      state.flexChartFilter = el.dataset.value;
       render();
       break;
     case 'open-periodic-check-form':
