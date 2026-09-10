@@ -272,6 +272,40 @@ async function loadMyLeaveEntries(uid) {
     state.myLeaveEntries = [];
   }
 }
+function normalizeSickLeaveEntry(id, d) {
+  return {
+    id,
+    employee_id: d.employeeId,
+    employee_name: d.employeeName,
+    department: d.department,
+    start_date: d.startDate,
+    end_date: d.endDate,
+    note: d.note || '',
+    created_at: d.createdAt && d.createdAt.toDate ? d.createdAt.toDate().toISOString() : d.createdAt
+  };
+}
+async function loadAllSickLeaveEntries() {
+  try {
+    const snap = await db.collection('sickLeaveEntries').get();
+    state.allSickLeaveEntries = snap.docs
+      .map(d => normalizeSickLeaveEntry(d.id, d.data()))
+      .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  } catch (err) {
+    console.error('Rapor kayıtları alınamadı:', err.message);
+    state.allSickLeaveEntries = [];
+  }
+}
+async function loadMySickLeaveEntries(uid) {
+  try {
+    const snap = await db.collection('sickLeaveEntries').where('employeeId', '==', uid).get();
+    state.mySickLeaveEntries = snap.docs
+      .map(d => normalizeSickLeaveEntry(d.id, d.data()))
+      .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  } catch (err) {
+    console.error('Rapor kayıtları alınamadı:', err.message);
+    state.mySickLeaveEntries = [];
+  }
+}
 async function callFunction(name, body) {
   const idToken = await fbAuth.currentUser.getIdToken();
   const res = await fetch(`${FUNCTIONS_BASE}/api/${name}`, {
@@ -317,7 +351,9 @@ const state = {
   bulkUpdateFileName: '',
   bulkUpdateResults: null,
   bulkUpdateSubmitting: false,
-  flexChartFilter: 'hepsi'
+  flexChartFilter: 'hepsi',
+  allSickLeaveEntries: [],
+  mySickLeaveEntries: []
 };
 
 /* =====================================================================
@@ -534,16 +570,16 @@ async function render() {
   if (route === '#/dashboard') {
     title = `Merhaba, ${escapeHtml(state.profile.first_name)} 👋`;
     subtitle = `${escapeHtml(state.profile.department)} · Sicil No: ${escapeHtml(state.profile.registry_number || '—')}`;
-    await Promise.all([loadAnnouncements(), loadMyPeriodicChecks(state.profile.id), loadMyLeaveEntries(state.profile.id)]);
+    await Promise.all([loadAnnouncements(), loadMyPeriodicChecks(state.profile.id), loadMyLeaveEntries(state.profile.id), loadMySickLeaveEntries(state.profile.id)]);
     content = employeeDashboardView();
   } else if (route === '#/admin') {
     title = 'Genel Bakış';
     subtitle = 'Yönetici Paneli';
-    await Promise.all([loadEmployees(), loadAnnouncements(), loadAllLeaveEntries()]);
+    await Promise.all([loadEmployees(), loadAnnouncements(), loadAllLeaveEntries(), loadAllSickLeaveEntries()]);
     content = adminDashboardView();
   } else if (route === '#/admin/employees') {
     title = 'Çalışanlar';
-    await Promise.all([loadEmployees(), loadAllLeaveEntries()]);
+    await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries()]);
     subtitle = `${state.employees.length} kayıtlı çalışan`;
     content = adminEmployeesView();
   } else if (route === '#/admin/import') {
@@ -832,6 +868,26 @@ function employeeDashboardView() {
     </div>
     <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
       ${state.myLeaveEntries.map(l => `
+        <div class="py-3">
+          <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+          ${l.note ? `<p class="mt-0.5 text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
+        </div>`).join('')}
+    </div>
+  </div>` : ''}
+
+  ${state.mySickLeaveEntries.length > 0 ? `
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
+        <i data-lucide="stethoscope" class="w-[18px] h-[18px]"></i>
+      </div>
+      <div>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Rapor Kayıtlarım</h2>
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Sağlık raporu dönemleriniz (geçmiş ve gelecek)</p>
+      </div>
+    </div>
+    <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+      ${state.mySickLeaveEntries.map(l => `
         <div class="py-3">
           <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
           ${l.note ? `<p class="mt-0.5 text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
@@ -1361,9 +1417,11 @@ function panelSectionHtml(employees) {
     .sort((a, b) => (a.flex_time_balance ?? 0) - (b.flex_time_balance ?? 0))
     .slice(0, 8);
 
-  const sickLeave = employees.filter(e => e.on_sick_leave);
-
   const today = new Date().toISOString().slice(0, 10);
+  const sickLeaveToday = state.allSickLeaveEntries.filter(l =>
+    l.start_date && l.end_date && l.start_date <= today && today <= l.end_date
+  );
+
   const onLeaveToday = state.allLeaveEntries.filter(l =>
     l.start_date && l.end_date && l.start_date <= today && today <= l.end_date
   );
@@ -1383,9 +1441,10 @@ function panelSectionHtml(employees) {
         e => fmtHours(e.flex_time_balance)
       )}
       ${miniEmployeePanel(
-        'Raporlu Çalışanlar', 'stethoscope', 'pine', sickLeave,
+        'Bugün Raporlu Olanlar', 'stethoscope', 'pine', sickLeaveToday,
         'Şu an raporlu çalışan yok.',
-        e => e.sick_leave_end_date ? e.sick_leave_end_date : '—'
+        l => l.end_date,
+        l => l.employee_name
       )}
       ${miniEmployeePanel(
         'Bugün İzinli Olanlar', 'calendar-off', 'brick', onLeaveToday,
@@ -1419,6 +1478,9 @@ function adminEmployeesView() {
         <div class="flex justify-end gap-1">
           <button data-action="open-leave-history" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="İzin Kayıtları">
             <i data-lucide="calendar-days" class="w-[15px] h-[15px]"></i>
+          </button>
+          <button data-action="open-sick-leave-history" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Rapor Kayıtları">
+            <i data-lucide="stethoscope" class="w-[15px] h-[15px]"></i>
           </button>
           <button data-action="edit-employee" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
             <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
@@ -1623,6 +1685,7 @@ function modalHtml() {
   if (state.modal.type === 'bulk-password') return bulkPasswordModal();
   if (state.modal.type === 'department-employees') return departmentEmployeesModal(state.modal.data);
   if (state.modal.type === 'leave-history') return leaveHistoryModal(state.modal.data);
+  if (state.modal.type === 'sick-leave-history') return sickLeaveHistoryModal(state.modal.data);
   if (state.modal.type === 'bulk-leave') return bulkLeaveModal();
   if (state.modal.type === 'bulk-update') return bulkUpdateModal();
   return '';
@@ -1671,16 +1734,6 @@ function employeeModal(emp) {
           <div><label class="label">Kesilen Saat Bakiyesi</label><input name="deducted_hours_balance" type="number" step="any" class="input" value="${isEdit ? (emp.deducted_hours_balance ?? 0) : 0}" /></div>
         </div>
         ${isEdit ? `
-        <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4 space-y-3">
-          <label class="flex items-center gap-2.5">
-            <input type="checkbox" name="on_sick_leave" id="on-sick-leave-checkbox" ${emp.on_sick_leave ? 'checked' : ''} class="h-4 w-4 rounded border-black/20 text-pine-600 focus:ring-pine-500" />
-            <span class="text-sm text-ink-800 dark:text-sand-100"><strong>Raporlu</strong> (şu an sağlık raporu ile izinli)</span>
-          </label>
-          <div id="sick-leave-date-wrap" class="${emp.on_sick_leave ? '' : 'hidden'}">
-            <label class="label">Rapor Bitiş Tarihi (opsiyonel)</label>
-            <input name="sick_leave_end_date" type="date" class="input" value="${emp.sick_leave_end_date || ''}" />
-          </div>
-        </div>
         <div class="rounded-lg border border-dashed border-black/10 dark:border-white/10 p-4">
           <label class="label">Yeni Şifre Belirle (opsiyonel)</label>
           <input name="new_password" type="text" minlength="6" class="input" placeholder="Değiştirmek istemiyorsanız boş bırakın" />
@@ -1808,6 +1861,10 @@ function bulkPasswordModal() {
 
 function departmentEmployeesModal(departmentName) {
   const list = state.employees.filter(e => e.department === departmentName);
+  const today = new Date().toISOString().slice(0, 10);
+  const activeSickLeave = (employeeId) => state.allSickLeaveEntries.find(l =>
+    l.employee_id === employeeId && l.start_date <= today && today <= l.end_date
+  );
   return `
   <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
     <div class="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
@@ -1829,7 +1886,7 @@ function departmentEmployeesModal(departmentName) {
                       <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
                       <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
                     </div>
-                    ${e.on_sick_leave ? `<span class="rounded-full bg-brick-500/10 px-2.5 py-1 text-[11px] font-medium text-brick-600">Raporlu${e.sick_leave_end_date ? ' · ' + escapeHtml(e.sick_leave_end_date) : ''}</span>` : ''}
+                    ${activeSickLeave(e.id) ? `<span class="rounded-full bg-brick-500/10 px-2.5 py-1 text-[11px] font-medium text-brick-600">Raporlu · ${escapeHtml(activeSickLeave(e.id).end_date)}</span>` : ''}
                   </div>
                   <div class="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
                     <div>
@@ -1899,6 +1956,58 @@ function leaveHistoryModal(employeeId) {
                     ${l.note ? `<p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
                   </div>
                   <button data-action="delete-leave-entry" data-id="${l.id}" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+                    <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+                  </button>
+                </div>`).join('')}
+            </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+function sickLeaveHistoryModal(employeeId) {
+  const emp = state.employees.find(x => x.id === employeeId);
+  if (!emp) return '';
+  const entries = state.allSickLeaveEntries
+    .filter(l => l.employee_id === employeeId)
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+
+  return `
+  <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
+    <div class="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
+      <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
+        <div>
+          <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">Rapor Kayıtları</h2>
+          <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(emp.first_name)} ${escapeHtml(emp.last_name)} · ${escapeHtml(emp.department)}</p>
+        </div>
+        <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <form id="sick-leave-entry-form" data-employee-id="${employeeId}" class="space-y-4 px-6 py-5 border-b border-black/5 dark:border-white/5">
+        <p class="text-sm font-medium text-ink-800 dark:text-sand-100">Yeni Rapor Dönemi Ekle</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="label">Başlangıç Tarihi</label><input name="start_date" type="date" required class="input" /></div>
+          <div><label class="label">Bitiş Tarihi</label><input name="end_date" type="date" required class="input" /></div>
+        </div>
+        <div><label class="label">Açıklama (opsiyonel)</label><input name="note" class="input" placeholder="Örn. sağlık raporu, ameliyat vb." /></div>
+        <div id="sick-leave-entry-form-error"></div>
+        <button type="submit" id="sick-leave-entry-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+          <i data-lucide="plus" class="w-4 h-4"></i> Ekle
+        </button>
+      </form>
+
+      <div class="px-6 py-5">
+        <p class="mb-3 text-sm font-medium text-ink-800 dark:text-sand-100">Geçmiş ve Gelecek Raporlar</p>
+        ${entries.length === 0
+          ? `<p class="text-sm text-ink-800/50 dark:text-sand-100/45">Henüz rapor kaydı yok.</p>`
+          : `<div class="divide-y divide-black/5 dark:divide-white/5">
+              ${entries.map(l => `
+                <div class="flex items-center justify-between gap-3 py-3">
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+                    ${l.note ? `<p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(l.note)}</p>` : ''}
+                  </div>
+                  <button data-action="delete-sick-leave-entry" data-id="${l.id}" class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
                     <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
                   </button>
                 </div>`).join('')}
@@ -2269,6 +2378,20 @@ document.addEventListener('click', async (e) => {
       }
       break;
     }
+    case 'open-sick-leave-history':
+      state.modal = { type: 'sick-leave-history', data: el.dataset.id };
+      render();
+      break;
+    case 'delete-sick-leave-entry': {
+      if (confirm('Bu rapor kaydını silmek istediğinize emin misiniz?')) {
+        const currentEmployeeId = state.modal?.data;
+        await db.collection('sickLeaveEntries').doc(el.dataset.id).delete();
+        await loadAllSickLeaveEntries();
+        state.modal = { type: 'sick-leave-history', data: currentEmployeeId };
+        render();
+      }
+      break;
+    }
     case 'edit-periodic-check': {
       const check = state.periodicChecks.find(x => x.id === el.dataset.id);
       state.modal = { type: 'periodic-check', data: check };
@@ -2318,10 +2441,6 @@ document.addEventListener('change', async (e) => {
         other.classList.add('hidden');
       }
     }
-  }
-  if (e.target.id === 'on-sick-leave-checkbox') {
-    const wrap = document.getElementById('sick-leave-date-wrap');
-    if (wrap) wrap.classList.toggle('hidden', !e.target.checked);
   }
 });
 
@@ -2439,9 +2558,7 @@ document.addEventListener('submit', async (e) => {
           annualLeaveUsed: Number(fd.get('annual_leave_used')),
           flexibleWorkNote: fd.get('flexible_work_note'),
           flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
-          deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0,
-          onSickLeave: fd.get('on_sick_leave') === 'on',
-          sickLeaveEndDate: fd.get('on_sick_leave') === 'on' ? (fd.get('sick_leave_end_date') || null) : null
+          deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0
         });
 
         const newPassword = fd.get('new_password');
@@ -2601,6 +2718,44 @@ document.addEventListener('submit', async (e) => {
     return;
   }
 
+  if (e.target.id === 'sick-leave-entry-form') {
+    e.preventDefault();
+    const form = e.target;
+    const employeeId = form.dataset.employeeId;
+    const fd = new FormData(form);
+    const btn = document.getElementById('sick-leave-entry-form-submit');
+    const errBox = document.getElementById('sick-leave-entry-form-error');
+    errBox.innerHTML = '';
+
+    const startDate = fd.get('start_date');
+    const endDate = fd.get('end_date');
+    if (startDate > endDate) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">Bitiş tarihi başlangıçtan önce olamaz.</p>`;
+      return;
+    }
+
+    const emp = state.employees.find(x => x.id === employeeId);
+    btn.disabled = true; btn.textContent = 'Ekleniyor…';
+    try {
+      await db.collection('sickLeaveEntries').add({
+        employeeId,
+        employeeName: `${emp.first_name} ${emp.last_name}`,
+        department: emp.department,
+        startDate,
+        endDate,
+        note: fd.get('note') || '',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      await loadAllSickLeaveEntries();
+      state.modal = { type: 'sick-leave-history', data: employeeId };
+      render();
+    } catch (err) {
+      errBox.innerHTML = `<p class="rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(err.message || 'Bir hata oluştu.')}</p>`;
+      btn.disabled = false; btn.textContent = 'Ekle';
+    }
+    return;
+  }
+
   if (e.target.id === 'bulk-password-form') {
     e.preventDefault();
     const form = e.target;
@@ -2724,22 +2879,43 @@ async function ensureBulkImportLibs() {
 
 async function exportEmployeesToExcel() {
   await ensureBulkImportLibs();
-  const rows = state.employees.map(e => ({
-    'Ad': e.first_name,
-    'Soyad': e.last_name,
-    'Sicil No': e.registry_number,
-    'Departman': e.department,
-    'Yıllık İzin Hakkı (gün)': e.annual_leave_total,
-    'Kullanılan İzin (gün)': e.annual_leave_used,
-    'Kalan İzin (gün)': Math.max(e.annual_leave_total - e.annual_leave_used, 0),
-    'Esnek Bakiye (saat)': e.flex_time_balance ?? 0,
-    'Kesilen Saat Bakiyesi': e.deducted_hours_balance ?? 0,
-    'Esnek Çalışma Notu': e.flexible_work_note || '',
-    'Raporlu': e.on_sick_leave ? 'Evet' : 'Hayır',
-    'Rapor Bitiş Tarihi': e.sick_leave_end_date || ''
-  }));
+  const today = new Date().toISOString().slice(0, 10);
+  const activeSickLeave = (employeeId) => state.allSickLeaveEntries.find(l =>
+    l.employee_id === employeeId && l.start_date <= today && today <= l.end_date
+  );
+
+  const rows = state.employees.map(e => {
+    const active = activeSickLeave(e.id);
+    return {
+      'Ad': e.first_name,
+      'Soyad': e.last_name,
+      'Sicil No': e.registry_number,
+      'Departman': e.department,
+      'Yıllık İzin Hakkı (gün)': e.annual_leave_total,
+      'Kullanılan İzin (gün)': e.annual_leave_used,
+      'Kalan İzin (gün)': Math.max(e.annual_leave_total - e.annual_leave_used, 0),
+      'Esnek Bakiye (saat)': e.flex_time_balance ?? 0,
+      'Kesilen Saat Bakiyesi': e.deducted_hours_balance ?? 0,
+      'Esnek Çalışma Notu': e.flexible_work_note || '',
+      'Şu An Raporlu': active ? 'Evet' : 'Hayır',
+      'Rapor Bitiş Tarihi': active ? active.end_date : ''
+    };
+  });
 
   const leaveRows = [...state.allLeaveEntries]
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0))
+    .map(l => ({
+      'Ad Soyad': l.employee_name,
+      'Departman': l.department,
+      'Başlangıç Tarihi': l.start_date,
+      'Bitiş Tarihi': l.end_date,
+      'Gün Sayısı': l.start_date && l.end_date
+        ? Math.round((new Date(l.end_date) - new Date(l.start_date)) / 86400000) + 1
+        : '',
+      'Açıklama': l.note || ''
+    }));
+
+  const sickLeaveRows = [...state.allSickLeaveEntries]
     .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0))
     .map(l => ({
       'Ad Soyad': l.employee_name,
@@ -2755,6 +2931,7 @@ async function exportEmployeesToExcel() {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'Çalışanlar');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(leaveRows), 'İzin Kayıtları');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sickLeaveRows), 'Sağlık Raporları');
   const dateStr = new Date().toISOString().slice(0, 10);
   XLSX.writeFile(wb, `calisanlar_${dateStr}.xlsx`);
 }
