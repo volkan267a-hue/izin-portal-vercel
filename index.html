@@ -358,7 +358,8 @@ const state = {
   bulkUpdateSubmitting: false,
   flexChartFilter: 'hepsi',
   allSickLeaveEntries: [],
-  mySickLeaveEntries: []
+  mySickLeaveEntries: [],
+  employeeActionsMenuOpen: false
 };
 
 /* =====================================================================
@@ -641,25 +642,45 @@ function shell(title, subtitle, content, role, route) {
     { href: '#/dashboard', label: 'Panelim', icon: 'layout-dashboard' },
     { href: '#/report', label: 'Öneri / Ramak Kala', icon: 'alert-triangle' }
   ];
-  const adminLinks = [
-    { href: '#/admin', label: 'Genel Bakış', icon: 'layout-dashboard' },
-    { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
-    { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
-    { href: '#/admin/announcements', label: 'Duyurular', icon: 'megaphone' },
-    { href: '#/admin/reports', label: 'Bildirimler', icon: 'alert-triangle' },
-    { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' }
+  const adminGroups = [
+    {
+      label: 'Genel',
+      links: [{ href: '#/admin', label: 'Genel Bakış', icon: 'layout-dashboard' }]
+    },
+    {
+      label: 'Çalışan Yönetimi',
+      links: [
+        { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
+        { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
+        { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' }
+      ]
+    },
+    {
+      label: 'İçerik',
+      links: [
+        { href: '#/admin/announcements', label: 'Duyurular', icon: 'megaphone' },
+        { href: '#/admin/reports', label: 'Bildirimler', icon: 'alert-triangle' }
+      ]
+    }
   ];
-  const links = role === 'admin' ? adminLinks : employeeLinks;
   const p = state.profile;
 
-  const navHtml = links.map(l => `
+  const linkHtml = (l) => `
     <a href="${l.href}" data-action="nav-link"
        class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
          route === l.href ? 'bg-white/10 text-white' : 'text-sand-100/70 hover:bg-white/5 hover:text-white'
        }">
       <i data-lucide="${l.icon}" class="w-[18px] h-[18px]"></i>
       ${l.label}
-    </a>`).join('');
+    </a>`;
+
+  const navHtml = role === 'admin'
+    ? adminGroups.map(g => `
+        <div class="mb-1">
+          <p class="px-3 pb-1.5 pt-3 text-[10px] font-semibold uppercase tracking-wider text-sand-100/35">${g.label}</p>
+          <div class="flex flex-col gap-1">${g.links.map(linkHtml).join('')}</div>
+        </div>`).join('')
+    : `<div class="flex flex-col gap-1">${employeeLinks.map(linkHtml).join('')}</div>`;
 
   return `
   <div class="flex min-h-screen bg-sand-50 dark:bg-ink-900">
@@ -674,7 +695,7 @@ function shell(title, subtitle, content, role, route) {
           <i data-lucide="x" class="w-5 h-5"></i>
         </button>
       </div>
-      <nav class="flex flex-col gap-1 px-3 py-5">${navHtml}</nav>
+      <nav class="flex flex-col px-3 py-4">${navHtml}</nav>
       <div class="absolute bottom-0 left-0 right-0 border-t border-white/10 p-4">
         <div class="flex items-center gap-3">
           <div class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-gold-400 to-gold-600 text-pine-950 text-sm font-semibold shadow-[0_2px_6px_rgba(0,0,0,0.3)]">
@@ -1470,7 +1491,7 @@ function adminEmployeesView() {
     `${e.first_name} ${e.last_name} ${e.registry_number} ${e.department}`.toLowerCase().includes(q));
 
   const rows = filtered.map(e => `
-    <tr>
+    <tr class="transition-colors hover:bg-sand-50/70 dark:hover:bg-ink-700/40">
       <td class="px-5 py-3.5">
         <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
         <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
@@ -1504,19 +1525,28 @@ function adminEmployeesView() {
       <input id="employee-search" value="${escapeHtml(state.employeeSearch || '')}" placeholder="İsim, sicil no veya departman ara…"
         class="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 pl-10 pr-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
     </div>
-    <div class="flex shrink-0 flex-wrap gap-2">
-      <button data-action="export-employees-excel" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
-        <i data-lucide="file-down" class="w-4 h-4"></i> Excel'e Aktar
-      </button>
-      <button data-action="open-bulk-leave-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
-        <i data-lucide="calendar-plus" class="w-4 h-4"></i> Toplu İzin Girişi
-      </button>
-      <button data-action="open-bulk-update-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
-        <i data-lucide="refresh-cw" class="w-4 h-4"></i> Toplu Güncelleme
-      </button>
-      <button data-action="open-bulk-password-form" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
-        <i data-lucide="key-round" class="w-4 h-4"></i> Tüm Şifreleri Aynı Yap
-      </button>
+    <div class="flex shrink-0 gap-2">
+      <div class="relative">
+        <button data-action="toggle-employee-actions-menu" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+          <i data-lucide="more-horizontal" class="w-4 h-4"></i> İşlemler
+        </button>
+        ${state.employeeActionsMenuOpen ? `
+        <div class="absolute right-0 z-20 mt-2 w-56 overflow-hidden rounded-lg border border-black/5 dark:border-white/10 bg-white dark:bg-ink-800 shadow-soft">
+          <button data-action="export-employees-excel" class="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-ink-800 dark:text-sand-100 hover:bg-sand-50 dark:hover:bg-ink-700">
+            <i data-lucide="file-down" class="w-4 h-4 text-ink-800/50 dark:text-sand-100/50"></i> Excel'e Aktar
+          </button>
+          <button data-action="open-bulk-leave-form" class="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-ink-800 dark:text-sand-100 hover:bg-sand-50 dark:hover:bg-ink-700">
+            <i data-lucide="calendar-plus" class="w-4 h-4 text-ink-800/50 dark:text-sand-100/50"></i> Toplu İzin Girişi
+          </button>
+          <button data-action="open-bulk-update-form" class="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-ink-800 dark:text-sand-100 hover:bg-sand-50 dark:hover:bg-ink-700">
+            <i data-lucide="refresh-cw" class="w-4 h-4 text-ink-800/50 dark:text-sand-100/50"></i> Toplu Güncelleme
+          </button>
+          <div class="border-t border-black/5 dark:border-white/10"></div>
+          <button data-action="open-bulk-password-form" class="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-ink-800 dark:text-sand-100 hover:bg-sand-50 dark:hover:bg-ink-700">
+            <i data-lucide="key-round" class="w-4 h-4 text-ink-800/50 dark:text-sand-100/50"></i> Tüm Şifreleri Aynı Yap
+          </button>
+        </div>` : ''}
+      </div>
       <button data-action="open-employee-form" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
         <i data-lucide="plus" class="w-4 h-4"></i> Yeni Çalışan
       </button>
@@ -1527,13 +1557,13 @@ function adminEmployeesView() {
     ${filtered.length === 0
       ? `<p class="p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45">Kayıt bulunamadı.</p>`
       : `<table class="w-full min-w-[720px] text-left text-sm">
-          <thead><tr class="border-b border-black/5 dark:border-white/5 text-xs text-ink-800/45 dark:text-sand-100/40">
-            <th class="px-5 py-3.5 font-medium">Ad Soyad</th>
-            <th class="px-5 py-3.5 font-medium">Departman</th>
-            <th class="px-5 py-3.5 font-medium">Esnek Saat</th>
-            <th class="px-5 py-3.5 font-medium">Kalan Yıllık İzin</th>
-            <th class="px-5 py-3.5 font-medium">İzin Kullanımı</th>
-            <th class="px-5 py-3.5 font-medium text-right">İşlemler</th>
+          <thead class="sticky top-0 z-10 bg-sand-50/95 dark:bg-ink-900/95 backdrop-blur"><tr class="border-b border-black/5 dark:border-white/5 text-[11px] font-semibold uppercase tracking-wider text-ink-800/45 dark:text-sand-100/40">
+            <th class="px-5 py-3.5">Ad Soyad</th>
+            <th class="px-5 py-3.5">Departman</th>
+            <th class="px-5 py-3.5">Esnek Saat</th>
+            <th class="px-5 py-3.5">Kalan Yıllık İzin</th>
+            <th class="px-5 py-3.5">İzin Kullanımı</th>
+            <th class="px-5 py-3.5 text-right">İşlemler</th>
           </tr></thead>
           <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
         </table>`}
@@ -2191,6 +2221,12 @@ document.addEventListener('click', async (e) => {
     state.modal = null; render(); return;
   }
 
+  // "İşlemler" menüsü dışına tıklayınca kapat
+  if (state.employeeActionsMenuOpen && !e.target.closest('[data-action="toggle-employee-actions-menu"]') && !e.target.closest('.absolute.right-0.z-20')) {
+    state.employeeActionsMenuOpen = false;
+    if (!el) { render(); return; }
+  }
+
   const link = e.target.closest('a[data-action="nav-link"]');
   if (link) { state.sidebarOpen = false; /* hashchange render'ı tetikler */ return; }
 
@@ -2198,6 +2234,10 @@ document.addEventListener('click', async (e) => {
   const action = el.dataset.action;
 
   switch (action) {
+    case 'toggle-employee-actions-menu':
+      state.employeeActionsMenuOpen = !state.employeeActionsMenuOpen;
+      render();
+      break;
     case 'open-sidebar': state.sidebarOpen = true; render(); break;
     case 'close-sidebar': state.sidebarOpen = false; render(); break;
     case 'toggle-theme': toggleTheme(); break;
@@ -2266,13 +2306,17 @@ document.addEventListener('click', async (e) => {
       render();
       break;
     case 'open-bulk-password-form':
+      state.employeeActionsMenuOpen = false;
       state.modal = { type: 'bulk-password' };
       render();
       break;
     case 'export-employees-excel':
+      state.employeeActionsMenuOpen = false;
       await exportEmployeesToExcel();
+      render();
       break;
     case 'open-bulk-leave-form':
+      state.employeeActionsMenuOpen = false;
       state.bulkLeaveResults = null;
       state.modal = { type: 'bulk-leave' };
       render();
@@ -2322,6 +2366,7 @@ document.addEventListener('click', async (e) => {
       break;
     }
     case 'open-bulk-update-form':
+      state.employeeActionsMenuOpen = false;
       state.bulkUpdateResults = null;
       state.bulkUpdateRows = [];
       state.bulkUpdateFileName = '';
