@@ -559,8 +559,9 @@ async function render() {
 
   const role = state.profile.role;
   const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks'];
+  const isEmployeeDetailRoute = route.startsWith('#/admin/employee/');
 
-  if (adminRoutes.includes(route) && role !== 'admin') {
+  if ((adminRoutes.includes(route) || isEmployeeDetailRoute) && role !== 'admin') {
     location.hash = '#/dashboard';
     return;
   }
@@ -588,6 +589,13 @@ async function render() {
     await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries()]);
     subtitle = `${state.employees.length} kayıtlı çalışan`;
     content = adminEmployeesView();
+  } else if (isEmployeeDetailRoute) {
+    const empId = route.replace('#/admin/employee/', '');
+    await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries(), loadAllPeriodicChecks()]);
+    const emp = state.employees.find(x => x.id === empId);
+    title = emp ? `${emp.first_name} ${emp.last_name}` : 'Çalışan Analizi';
+    subtitle = emp ? `${emp.department} · Sicil No: ${emp.registry_number || '—'}` : '';
+    content = employeeAnalysisView(empId);
   } else if (route === '#/admin/import') {
     title = 'Toplu Ekleme';
     subtitle = 'Excel veya CSV dosyasından çalışan aktarın';
@@ -665,14 +673,17 @@ function shell(title, subtitle, content, role, route) {
   ];
   const p = state.profile;
 
-  const linkHtml = (l) => `
+  const linkHtml = (l) => {
+    const isActive = route === l.href || (l.href === '#/admin/employees' && route.startsWith('#/admin/employee/'));
+    return `
     <a href="${l.href}" data-action="nav-link"
        class="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-         route === l.href ? 'bg-white/10 text-white' : 'text-sand-100/70 hover:bg-white/5 hover:text-white'
+         isActive ? 'bg-white/10 text-white' : 'text-sand-100/70 hover:bg-white/5 hover:text-white'
        }">
       <i data-lucide="${l.icon}" class="w-[18px] h-[18px]"></i>
       ${l.label}
     </a>`;
+  };
 
   const navHtml = role === 'admin'
     ? adminGroups.map(g => `
@@ -1493,7 +1504,7 @@ function adminEmployeesView() {
   const rows = filtered.map(e => `
     <tr class="transition-colors hover:bg-sand-50/70 dark:hover:bg-ink-700/40">
       <td class="px-5 py-3.5">
-        <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+        <a href="#/admin/employee/${e.id}" class="font-medium text-ink-900 dark:text-sand-50 hover:text-pine-700 dark:hover:text-gold-400 hover:underline">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</a>
         <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
       </td>
       <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
@@ -1567,6 +1578,105 @@ function adminEmployeesView() {
           </tr></thead>
           <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
         </table>`}
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — ÇALIŞAN ANALİZİ (tek çalışan detay sayfası)
+   ===================================================================== */
+function employeeAnalysisView(employeeId) {
+  const emp = state.employees.find(x => x.id === employeeId);
+  if (!emp) {
+    return `
+    <div class="card p-8 text-center bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <p class="text-sm text-ink-800/50 dark:text-sand-100/45">Çalışan bulunamadı.</p>
+      <a href="#/admin/employees" class="mt-3 inline-block text-sm font-medium text-pine-700 dark:text-gold-400 hover:underline">Çalışanlar sayfasına dön</a>
+    </div>`;
+  }
+
+  const leaveEntries = state.allLeaveEntries
+    .filter(l => l.employee_id === employeeId)
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  const sickEntries = state.allSickLeaveEntries
+    .filter(l => l.employee_id === employeeId)
+    .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
+  const checks = state.periodicChecks
+    .filter(c => c.employee_id === employeeId)
+    .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0));
+
+  const today = new Date().toISOString().slice(0, 10);
+  const currentlyOnLeave = leaveEntries.find(l => l.start_date <= today && today <= l.end_date);
+  const currentlyOnReport = sickEntries.find(l => l.start_date <= today && today <= l.end_date);
+
+  const timelineSection = (title, icon, items, emptyText, badge) => `
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex items-center gap-2.5">
+        <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
+          <i data-lucide="${icon}" class="w-4 h-4"></i>
+        </div>
+        <h3 class="font-display text-sm font-semibold text-ink-900 dark:text-sand-50">${title}</h3>
+      </div>
+      ${items.length === 0
+        ? `<p class="mt-4 text-xs text-ink-800/45 dark:text-sand-100/40">${emptyText}</p>`
+        : `<div class="mt-4 max-h-72 overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
+            ${items.map(i => badge(i)).join('')}
+          </div>`}
+    </div>`;
+
+  return `
+  <div class="mb-5">
+    <a href="#/admin/employees" class="inline-flex items-center gap-1.5 text-sm font-medium text-ink-800/60 dark:text-sand-100/55 hover:text-pine-700 dark:hover:text-gold-400">
+      <i data-lucide="arrow-left" class="w-4 h-4"></i> Çalışanlara dön
+    </a>
+  </div>
+
+  <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div class="flex items-center gap-4">
+        <div class="flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-gold-400 to-gold-600 text-pine-950 text-lg font-semibold shadow-[0_2px_8px_rgba(0,0,0,0.25)]">
+          ${escapeHtml((emp.first_name || ' ')[0])}${escapeHtml((emp.last_name || ' ')[0])}
+        </div>
+        <div>
+          <h2 class="font-display text-xl font-bold text-ink-900 dark:text-sand-50">${escapeHtml(emp.first_name)} ${escapeHtml(emp.last_name)}</h2>
+          <p class="text-sm text-ink-800/55 dark:text-sand-100/50">${escapeHtml(emp.department)} · Sicil No: ${escapeHtml(emp.registry_number || '—')}</p>
+          <div class="mt-2 flex flex-wrap gap-1.5">
+            ${currentlyOnLeave ? `<span class="rounded-full bg-brick-500/10 px-2.5 py-1 text-[11px] font-medium text-brick-600">Bugün İzinli · ${escapeHtml(currentlyOnLeave.end_date)}'e kadar</span>` : ''}
+            ${currentlyOnReport ? `<span class="rounded-full bg-brick-500/10 px-2.5 py-1 text-[11px] font-medium text-brick-600">Bugün Raporlu · ${escapeHtml(currentlyOnReport.end_date)}'e kadar</span>` : ''}
+          </div>
+        </div>
+      </div>
+      <button data-action="edit-employee" data-id="${emp.id}" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">
+        <i data-lucide="pencil" class="w-4 h-4"></i> Düzenle
+      </button>
+    </div>
+  </div>
+
+  <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    ${statCard('palmtree', 'Kalan Yıllık İzin', `${Math.max(emp.annual_leave_total - emp.annual_leave_used, 0)} gün`, `${emp.annual_leave_used} / ${emp.annual_leave_total} kullanıldı`, 'brick')}
+    ${statCard('trending-down', 'Esnek Bakiye', fmtHours(emp.flex_time_balance), '', emp.flex_time_balance < 0 ? 'brick' : 'pine')}
+    ${statCard('clock', 'Kesilen Saat Bakiyesi', fmtHours(emp.deducted_hours_balance), '', 'gold')}
+    ${statCard('calendar-days', 'Toplam İzin Kaydı', leaveEntries.length, `${sickEntries.length} rapor kaydı`, 'pine')}
+  </div>
+
+  <div class="mt-5 grid gap-5 lg:grid-cols-3">
+    ${timelineSection('İzin Geçmişi', 'calendar-days', leaveEntries, 'Henüz izin kaydı yok.', l => `
+      <div class="py-2.5">
+        <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+        ${l.note ? `<p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.note)}</p>` : ''}
+      </div>`)}
+    ${timelineSection('Rapor Kayıtları', 'stethoscope', sickEntries, 'Henüz rapor kaydı yok.', l => `
+      <div class="py-2.5">
+        <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
+        ${l.note ? `<p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.note)}</p>` : ''}
+      </div>`)}
+    ${timelineSection('Periyodik Kontroller', 'clipboard-list', checks, 'Henüz kontrol kaydı yok.', c => `
+      <div class="flex items-center justify-between gap-2 py-2.5">
+        <div class="min-w-0">
+          <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</p>
+          <p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(c.due_date)}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+      </div>`)}
   </div>`;
 }
 
