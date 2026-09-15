@@ -311,6 +311,22 @@ async function loadMySickLeaveEntries(uid) {
     state.mySickLeaveEntries = [];
   }
 }
+async function loadShiftSchedule() {
+  try {
+    const doc = await db.collection('shiftSchedule').doc('current').get();
+    if (!doc.exists) { state.shiftSchedule = null; return; }
+    const d = doc.data();
+    state.shiftSchedule = {
+      fileName: d.fileName,
+      fileDataUrl: d.fileDataUrl,
+      uploadedAt: d.uploadedAt && d.uploadedAt.toDate ? d.uploadedAt.toDate().toISOString() : d.uploadedAt,
+      uploadedByName: d.uploadedByName || ''
+    };
+  } catch (err) {
+    console.error('Vardiya planı alınamadı:', err.message);
+    state.shiftSchedule = null;
+  }
+}
 async function callFunction(name, body) {
   const idToken = await fbAuth.currentUser.getIdToken();
   const res = await fetch(`${FUNCTIONS_BASE}/api/${name}`, {
@@ -359,7 +375,10 @@ const state = {
   flexChartFilter: 'hepsi',
   allSickLeaveEntries: [],
   mySickLeaveEntries: [],
-  employeeActionsMenuOpen: false
+  employeeActionsMenuOpen: false,
+  shiftSchedule: null,
+  shiftScheduleUploading: false,
+  shiftScheduleError: ''
 };
 
 /* =====================================================================
@@ -558,7 +577,7 @@ async function render() {
   }
 
   const role = state.profile.role;
-  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks'];
+  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks', '#/admin/shifts'];
   const isEmployeeDetailRoute = route.startsWith('#/admin/employee/');
 
   if ((adminRoutes.includes(route) || isEmployeeDetailRoute) && role !== 'admin') {
@@ -605,6 +624,16 @@ async function render() {
     subtitle = 'Bir öneriniz veya ramak kala olayınız mı var?';
     await loadMyReports(state.profile.id);
     content = employeeReportView();
+  } else if (route === '#/shifts') {
+    title = 'Vardiyalarım';
+    subtitle = 'Güncel vardiya listesini görüntüleyin veya indirin';
+    await loadShiftSchedule();
+    content = employeeShiftsView();
+  } else if (route === '#/admin/shifts') {
+    title = 'Vardiyalar';
+    subtitle = 'Güncel vardiya planını PDF olarak yükleyin';
+    await loadShiftSchedule();
+    content = adminShiftsView();
   } else if (route === '#/admin/announcements') {
     title = 'Duyurular';
     await loadAnnouncements();
@@ -648,6 +677,7 @@ function loadingScreen(msg) {
 function shell(title, subtitle, content, role, route) {
   const employeeLinks = [
     { href: '#/dashboard', label: 'Panelim', icon: 'layout-dashboard' },
+    { href: '#/shifts', label: 'Vardiyalarım', icon: 'calendar-clock' },
     { href: '#/report', label: 'Öneri / Ramak Kala', icon: 'alert-triangle' }
   ];
   const adminGroups = [
@@ -660,7 +690,8 @@ function shell(title, subtitle, content, role, route) {
       links: [
         { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
         { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
-        { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' }
+        { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' },
+        { href: '#/admin/shifts', label: 'Vardiyalar', icon: 'calendar-clock' }
       ]
     },
     {
@@ -781,7 +812,7 @@ function loginScreen() {
               </li>`).join('')}
           </ul>
         </div>
-        <p class="text-xs text-sand-100/40">© ${new Date().getFullYear()} L1 Hattı </p>
+        <p class="text-xs text-sand-100/40">© ${new Date().getFullYear()} Şirket Adı</p>
       </div>
 
       <div class="bg-white dark:bg-ink-800 p-8 sm:p-10">
@@ -1032,13 +1063,100 @@ function announcementCard(a, editable) {
 /* =====================================================================
    ÇALIŞAN — ÖNERİ / RAMAK KALA BİLDİRİMİ
    ===================================================================== */
+/* =====================================================================
+   ÇALIŞAN — VARDİYALARIM
+   ===================================================================== */
+/* =====================================================================
+   ADMIN — VARDİYALAR
+   ===================================================================== */
+function adminShiftsView() {
+  const s = state.shiftSchedule;
+  return `
+  <div class="grid gap-5 lg:grid-cols-3">
+    <div class="card p-6 lg:col-span-2 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Vardiya Planı Yükle</h2>
+      <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Yeni bir PDF yüklediğinizde, mevcut vardiya planının yerini alır. Dosya boyutu en fazla ~700 KB olmalıdır.</p>
+
+      <div id="shift-dropzone" class="mt-4 flex cursor-pointer flex-col items-center justify-center rounded-xl2 border-2 border-dashed border-pine-300 dark:border-pine-700 bg-pine-50/40 dark:bg-pine-900/10 px-6 py-10 text-center transition hover:bg-pine-50 dark:hover:bg-pine-900/20">
+        <i data-lucide="upload-cloud" class="w-7 h-7 text-pine-600 dark:text-pine-400"></i>
+        <p class="mt-2 text-sm font-medium text-ink-900 dark:text-sand-50">${state.shiftScheduleUploading ? 'Yükleniyor…' : 'PDF dosyasını sürükleyip bırakın veya tıklayın'}</p>
+        <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Sadece .pdf</p>
+        <input id="shift-file-input" type="file" accept="application/pdf" class="hidden" ${state.shiftScheduleUploading ? 'disabled' : ''} />
+      </div>
+      ${state.shiftScheduleError ? `<p class="mt-3 rounded-lg bg-brick-500/10 px-3.5 py-2.5 text-sm text-brick-600">${escapeHtml(state.shiftScheduleError)}</p>` : ''}
+
+      ${s ? `
+      <div class="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-sand-50 dark:bg-ink-900 px-4 py-3">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <i data-lucide="file-text" class="w-4 h-4 shrink-0 text-ink-800/50 dark:text-sand-100/50"></i>
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(s.fileName)}</p>
+            <p class="text-xs text-ink-800/45 dark:text-sand-100/40">${s.uploadedAt ? new Date(s.uploadedAt).toLocaleString('tr-TR') : ''}${s.uploadedByName ? ' · ' + escapeHtml(s.uploadedByName) : ''}</p>
+          </div>
+        </div>
+        <div class="flex shrink-0 gap-2">
+          <a href="${s.fileDataUrl}" download="${escapeHtml(s.fileName)}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="İndir">
+            <i data-lucide="download" class="w-[15px] h-[15px]"></i>
+          </a>
+          <button data-action="delete-shift-schedule" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+            <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+          </button>
+        </div>
+      </div>` : ''}
+    </div>
+
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
+        <i data-lucide="info" class="w-[18px] h-[18px]"></i>
+      </div>
+      <h3 class="mt-3 font-display text-sm font-semibold text-ink-900 dark:text-sand-50">Nasıl çalışır?</h3>
+      <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
+        Yüklediğiniz PDF, tüm çalışanların "Vardiyalarım" sayfasında anında görünür. Sadece TEK bir güncel plan tutulur — yeni bir dosya yüklediğinizde eskisinin yerini alır.
+      </p>
+    </div>
+  </div>
+
+  ${s ? `
+  <div class="mt-8 card overflow-hidden bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="border-b border-black/5 dark:border-white/5 px-6 py-4">
+      <p class="text-sm font-medium text-ink-900 dark:text-sand-50">Önizleme</p>
+    </div>
+    <iframe src="${s.fileDataUrl}" class="h-[70vh] w-full" title="Vardiya Planı Önizleme"></iframe>
+  </div>` : ''}`;
+}
+
+function employeeShiftsView() {
+  const s = state.shiftSchedule;
+  if (!s) {
+    return `
+    <div class="card p-10 text-center bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-sand-100 dark:bg-ink-700 text-ink-800/40 dark:text-sand-100/40">
+        <i data-lucide="calendar-clock" class="w-6 h-6"></i>
+      </div>
+      <p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz bir vardiya planı yüklenmedi.</p>
+    </div>`;
+  }
+  return `
+  <div class="card overflow-hidden bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-black/5 dark:border-white/5 px-6 py-4">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <i data-lucide="file-text" class="w-4 h-4 shrink-0 text-ink-800/50 dark:text-sand-100/50"></i>
+        <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(s.fileName)}</p>
+      </div>
+      <a href="${s.fileDataUrl}" download="${escapeHtml(s.fileName)}" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+        <i data-lucide="download" class="w-4 h-4"></i> İndir
+      </a>
+    </div>
+    <iframe src="${s.fileDataUrl}" class="h-[75vh] w-full" title="Vardiya Planı"></iframe>
+  </div>`;
+}
+
 function employeeReportView() {
   const p = state.profile;
   const myReports = state.myReports;
 
   return `
-  <div class="grid gap-5 lg:grid-cols-3">
-    <div class="card p-6 lg:col-span-2 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+  <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
       <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yeni Bildirim</h2>
       <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Bir öneriniz veya fark ettiğiniz bir ramak kala (near-miss) olayı varsa bildirin.</p>
 
@@ -1100,19 +1218,9 @@ function employeeReportView() {
         <button type="submit" ${state.reportSubmitting ? 'disabled' : ''} class="btn-primary w-full inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700 disabled:opacity-50">
           ${state.reportSubmitting ? 'Gönderiliyor…' : 'Bildirimi Gönder'}
         </button>
-      </form>
-    </div>
 
-    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
-      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
-        <i data-lucide="info" class="w-[18px] h-[18px]"></i>
-      </div>
-      <h3 class="mt-3 font-display text-sm font-semibold text-ink-900 dark:text-sand-50">Neden önemli?</h3>
-      <p class="mt-2 text-xs leading-relaxed text-ink-800/60 dark:text-sand-100/50">
-        Ramak kala bildirimleri, henüz bir kazaya dönüşmemiş riskli durumları erken tespit etmemizi sağlar.
-        Önerileriniz de çalışma ortamını iyileştirmemize yardımcı olur. Bildiriminiz sadece yöneticiler tarafından görüntülenir.
-      </p>
-    </div>
+        <p class="text-center text-xs text-ink-800/40 dark:text-sand-100/35">Bildiriminiz sadece yöneticiler tarafından görüntülenir.</p>
+      </form>
   </div>
 
   <div class="mt-8">
@@ -2384,6 +2492,14 @@ document.addEventListener('click', async (e) => {
     case 'download-template': downloadTemplate(); break;
     case 'download-leave-template': downloadLeaveTemplate(); break;
     case 'download-update-template': downloadUpdateTemplate(); break;
+    case 'delete-shift-schedule': {
+      if (confirm('Güncel vardiya planını silmek istediğinize emin misiniz?')) {
+        await db.collection('shiftSchedule').doc('current').delete();
+        await loadShiftSchedule();
+        render();
+      }
+      break;
+    }
     case 'import-bulk': await handleBulkImport(); break;
     case 'add-bulk-row':
       state.bulkRows = [...state.bulkRows, {
@@ -2965,6 +3081,10 @@ document.addEventListener('click', (e) => {
     const input = document.getElementById('bulk-update-file-input');
     if (input) input.click();
   }
+  if (e.target.closest('#shift-dropzone')) {
+    const input = document.getElementById('shift-file-input');
+    if (input) input.click();
+  }
 });
 document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-file-input') {
@@ -2978,6 +3098,10 @@ document.addEventListener('change', (e) => {
   if (e.target.id === 'bulk-update-file-input') {
     const file = e.target.files?.[0];
     if (file) parseBulkUpdateFile(file);
+  }
+  if (e.target.id === 'shift-file-input') {
+    const file = e.target.files?.[0];
+    if (file) uploadShiftSchedule(file);
   }
   if (e.target.id === 'report-photo-input') {
     const file = e.target.files?.[0];
@@ -2996,6 +3120,7 @@ document.addEventListener('dragover', (e) => {
   if (e.target.closest('#dropzone')) e.preventDefault();
   if (e.target.closest('#bulk-leave-dropzone')) e.preventDefault();
   if (e.target.closest('#bulk-update-dropzone')) e.preventDefault();
+  if (e.target.closest('#shift-dropzone')) e.preventDefault();
 });
 document.addEventListener('drop', (e) => {
   const dz = e.target.closest('#dropzone');
@@ -3015,6 +3140,12 @@ document.addEventListener('drop', (e) => {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) parseBulkUpdateFile(file);
+  }
+  const shiftDz = e.target.closest('#shift-dropzone');
+  if (shiftDz) {
+    e.preventDefault();
+    const file = e.dataTransfer.files?.[0];
+    if (file) uploadShiftSchedule(file);
   }
 });
 
@@ -3255,6 +3386,48 @@ function downloadUpdateTemplate() {
   const a = document.createElement('a');
   a.href = url; a.download = 'guncelleme_sablonu.csv'; a.click();
   URL.revokeObjectURL(url);
+}
+
+async function uploadShiftSchedule(file) {
+  state.shiftScheduleError = '';
+
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    state.shiftScheduleError = 'Sadece PDF dosyası yükleyebilirsiniz.';
+    render();
+    return;
+  }
+  const MAX_BYTES = 700 * 1024; // ~700 KB — Firestore'un 1MB belge sınırı içinde güvenli kalmak için
+  if (file.size > MAX_BYTES) {
+    state.shiftScheduleError = `Dosya çok büyük (${Math.round(file.size / 1024)} KB). En fazla ~700 KB olmalı — PDF'i sıkıştırıp tekrar deneyin.`;
+    render();
+    return;
+  }
+
+  state.shiftScheduleUploading = true;
+  render();
+
+  try {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    await db.collection('shiftSchedule').doc('current').set({
+      fileName: file.name,
+      fileDataUrl: dataUrl,
+      uploadedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      uploadedByName: `${state.profile.first_name} ${state.profile.last_name}`
+    });
+
+    await loadShiftSchedule();
+  } catch (err) {
+    state.shiftScheduleError = err.message || 'Yükleme sırasında bir hata oluştu.';
+  } finally {
+    state.shiftScheduleUploading = false;
+    render();
+  }
 }
 
 function downloadTemplate() {
