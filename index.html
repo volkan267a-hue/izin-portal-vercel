@@ -111,6 +111,38 @@
     background-image: radial-gradient(rgba(255,255,255,.06) 1px, transparent 1px);
     background-size: 18px 18px;
   }
+
+  /* Form kontrolleri — TÜM input/select/textarea elemanları için genel,
+     her zaman geçerli stil (belirli bir modal'a bağlı değil). */
+  .input {
+    width: 100%;
+    border-radius: .5rem;
+    border: 1px solid rgba(0,0,0,.1);
+    padding: .625rem .875rem;
+    font-size: .875rem;
+    outline: none;
+    background: #ffffff;
+    color: #101715;
+    color-scheme: light;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .input::placeholder { color: rgba(16,23,21,.4); }
+  .input:focus { border-color: #205c52; box-shadow: 0 0 0 1px #205c52; }
+  .dark .input {
+    background: #101715;
+    border-color: rgba(255,255,255,.1);
+    color: #f5f1e8;
+    color-scheme: dark;
+  }
+  .dark .input::placeholder { color: rgba(245,241,232,.35); }
+  .label {
+    display: block;
+    font-size: .875rem;
+    font-weight: 500;
+    margin-bottom: .375rem;
+    color: #16201d;
+  }
+  .dark .label { color: #eadfc8; }
 </style>
 </head>
 <body class="bg-sand-50 dark:bg-ink-900 text-ink-900 dark:text-sand-100 transition-colors">
@@ -2000,12 +2032,7 @@ function employeeModal(emp) {
         </div>
       </form>
     </div>
-  </div>
-  <style>.input{width:100%;border-radius:.5rem;border:1px solid rgba(0,0,0,.1);padding:.625rem .875rem;font-size:.875rem;outline:none;background:white}
-  .dark .input{background:#101715;border-color:rgba(255,255,255,.1);color:#f5f1e8}
-  .input:focus{border-color:#205c52;box-shadow:0 0 0 1px #205c52}
-  .label{display:block;font-size:.875rem;font-weight:500;margin-bottom:.375rem;color:#16201d}
-  .dark .label{color:#eadfc8}</style>`;
+  </div>`;
 }
 
 function announcementModal(ann) {
