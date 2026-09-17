@@ -163,7 +163,6 @@ const firebaseConfig = {
   appId: "1:1073816187669:web:40a73a49133f5f1caeef1c"
 };
 
-
 // Bu site Vercel'e yüklendiğinde admin işlemleri (çalışan ekleme, toplu içeri
 // aktarma, çalışan silme, şifre değiştirme) aynı sitedeki /api fonksiyonlarını
 // kullanır — değiştirmenize gerek yok, boş bırakılırsa otomatik olarak
@@ -193,7 +192,8 @@ function normalizeProfile(id, d) {
     flex_time_balance: d.flexTimeBalance ?? 0,
     deducted_hours_balance: d.deductedHoursBalance ?? 0,
     on_sick_leave: d.onSickLeave || false,
-    sick_leave_end_date: d.sickLeaveEndDate || null
+    sick_leave_end_date: d.sickLeaveEndDate || null,
+    employee_group: d.employeeGroup || 'standard'
   };
 }
 function normalizeAnnouncement(id, d) {
@@ -419,7 +419,9 @@ const state = {
   announcementImageData: '',
   announcementAttachmentData: '',
   announcementAttachmentName: '',
-  announcementAttachmentError: ''
+  announcementAttachmentError: '',
+  employeeFormGroup: 'standard',
+  spoEmployeeSearch: ''
 };
 
 /* =====================================================================
@@ -618,7 +620,7 @@ async function render() {
   }
 
   const role = state.profile.role;
-  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks', '#/admin/shifts'];
+  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/spo-employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks', '#/admin/shifts'];
   const isEmployeeDetailRoute = route.startsWith('#/admin/employee/');
 
   if ((adminRoutes.includes(route) || isEmployeeDetailRoute) && role !== 'admin') {
@@ -647,8 +649,13 @@ async function render() {
   } else if (route === '#/admin/employees') {
     title = 'Çalışanlar';
     await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries()]);
-    subtitle = `${state.employees.length} kayıtlı çalışan`;
+    subtitle = `${state.employees.filter(e => e.employee_group !== 'spo').length} kayıtlı çalışan`;
     content = adminEmployeesView();
+  } else if (route === '#/admin/spo-employees') {
+    title = 'SPO Çalışanları';
+    await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries()]);
+    subtitle = `${state.employees.filter(e => e.employee_group === 'spo').length} kayıtlı SPO çalışanı`;
+    content = adminSpoEmployeesView();
   } else if (isEmployeeDetailRoute) {
     const empId = route.replace('#/admin/employee/', '');
     await Promise.all([loadEmployees(), loadAllLeaveEntries(), loadAllSickLeaveEntries(), loadAllPeriodicChecks()]);
@@ -730,6 +737,7 @@ function shell(title, subtitle, content, role, route) {
       label: 'Çalışan Yönetimi',
       links: [
         { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
+        { href: '#/admin/spo-employees', label: 'SPO Çalışanları', icon: 'user-cog' },
         { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
         { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' },
         { href: '#/admin/shifts', label: 'Vardiyalar', icon: 'calendar-clock' }
@@ -1506,7 +1514,7 @@ function flexBalanceChartHtml(allEmployees) {
 }
 
 function adminDashboardView() {
-  const employees = state.employees;
+  const employees = state.employees.filter(e => e.employee_group !== 'spo');
   const total = employees.length;
   const avgUsage = total > 0
     ? Math.round((employees.reduce((s, e) => s + (e.annual_leave_used / (e.annual_leave_total || 1)), 0) / total) * 100)
@@ -1658,8 +1666,9 @@ function panelSectionHtml(employees) {
    ADMIN — ÇALIŞANLAR
    ===================================================================== */
 function adminEmployeesView() {
+  const standardEmployees = state.employees.filter(e => e.employee_group !== 'spo');
   const q = (state.employeeSearch || '').trim().toLowerCase();
-  const filtered = !q ? state.employees : state.employees.filter(e =>
+  const filtered = !q ? standardEmployees : standardEmployees.filter(e =>
     `${e.first_name} ${e.last_name} ${e.registry_number} ${e.department}`.toLowerCase().includes(q));
 
   const rows = filtered.map(e => `
@@ -1723,6 +1732,77 @@ function adminEmployeesView() {
         <i data-lucide="plus" class="w-4 h-4"></i> Yeni Çalışan
       </button>
     </div>
+  </div>
+
+  <div class="card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    ${filtered.length === 0
+      ? `<p class="p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45">Kayıt bulunamadı.</p>`
+      : `<table class="w-full min-w-[720px] text-left text-sm">
+          <thead class="sticky top-0 z-10 bg-sand-50/95 dark:bg-ink-900/95 backdrop-blur"><tr class="border-b border-black/5 dark:border-white/5 text-[11px] font-semibold uppercase tracking-wider text-ink-800/45 dark:text-sand-100/40">
+            <th class="px-5 py-3.5">Ad Soyad</th>
+            <th class="px-5 py-3.5">Departman</th>
+            <th class="px-5 py-3.5">Esnek Saat</th>
+            <th class="px-5 py-3.5">Kalan Yıllık İzin</th>
+            <th class="px-5 py-3.5">İzin Kullanımı</th>
+            <th class="px-5 py-3.5 text-right">İşlemler</th>
+          </tr></thead>
+          <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
+        </table>`}
+  </div>`;
+}
+
+/* =====================================================================
+   ADMIN — SPO ÇALIŞANLARI (Genel Bakış'a dahil edilmeyen ayrı grup)
+   ===================================================================== */
+function adminSpoEmployeesView() {
+  const spoEmployees = state.employees.filter(e => e.employee_group === 'spo');
+  const q = (state.spoEmployeeSearch || '').trim().toLowerCase();
+  const filtered = !q ? spoEmployees : spoEmployees.filter(e =>
+    `${e.first_name} ${e.last_name} ${e.registry_number} ${e.department}`.toLowerCase().includes(q));
+
+  const rows = filtered.map(e => `
+    <tr class="transition-colors hover:bg-sand-50/70 dark:hover:bg-ink-700/40">
+      <td class="px-5 py-3.5">
+        <a href="#/admin/employee/${e.id}" class="font-medium text-ink-900 dark:text-sand-50 hover:text-pine-700 dark:hover:text-gold-400 hover:underline">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</a>
+        <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
+      </td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 ${e.flex_time_balance < 0 ? 'text-brick-500 dark:text-brick-500' : ''}">${fmtHours(e.flex_time_balance)}</td>
+      <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} gün</td>
+      <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
+      <td class="px-5 py-3.5">
+        <div class="flex justify-end gap-1">
+          <button data-action="open-leave-history" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="İzin Kayıtları">
+            <i data-lucide="calendar-days" class="w-[15px] h-[15px]"></i>
+          </button>
+          <button data-action="open-sick-leave-history" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Rapor Kayıtları">
+            <i data-lucide="stethoscope" class="w-[15px] h-[15px]"></i>
+          </button>
+          <button data-action="edit-employee" data-id="${e.id}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-sand-100 hover:text-pine-700 dark:text-sand-100/50 dark:hover:bg-ink-700" aria-label="Düzenle">
+            <i data-lucide="pencil" class="w-[15px] h-[15px]"></i>
+          </button>
+          <button data-action="delete-employee" data-id="${e.id}" data-name="${escapeHtml(e.first_name + ' ' + e.last_name)}" class="flex h-8 w-8 items-center justify-center rounded-lg text-ink-800/50 hover:bg-brick-500/10 hover:text-brick-600 dark:text-sand-100/50" aria-label="Sil">
+            <i data-lucide="trash-2" class="w-[15px] h-[15px]"></i>
+          </button>
+        </div>
+      </td>
+    </tr>`).join('');
+
+  return `
+  <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div class="relative w-full sm:max-w-xs">
+      <i data-lucide="search" class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-800/35 dark:text-sand-100/35"></i>
+      <input id="spo-employee-search" value="${escapeHtml(state.spoEmployeeSearch || '')}" placeholder="İsim, sicil no veya departman ara…"
+        class="w-full rounded-lg border border-black/10 dark:border-white/10 bg-white dark:bg-ink-900 pl-10 pr-3.5 py-2.5 text-sm focus:border-pine-500 focus:ring-1 focus:ring-pine-500 outline-none" />
+    </div>
+    <button data-action="open-spo-employee-form" class="btn-primary shrink-0 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+      <i data-lucide="plus" class="w-4 h-4"></i> Yeni SPO Çalışanı Ekle
+    </button>
+  </div>
+
+  <div class="mb-5 rounded-lg bg-gold-500/10 px-4 py-3 text-xs text-gold-600 dark:text-gold-400">
+    <i data-lucide="info" class="inline w-3.5 h-3.5 mr-1 align-text-bottom"></i>
+    SPO çalışanları Genel Bakış sayfasındaki istatistiklere ve grafiklere dahil edilmez; ayrı bir grup olarak takip edilir. Sicil no + şifreleriyle sisteme giriş yapabilirler.
   </div>
 
   <div class="card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
@@ -2003,7 +2083,10 @@ function employeeModal(emp) {
   <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
     <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
       <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
-        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Çalışanı Düzenle' : 'Yeni Çalışan Ekle'}</h2>
+        <div>
+          <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Çalışanı Düzenle' : 'Yeni Çalışan Ekle'}</h2>
+          ${!isEdit && state.employeeFormGroup === 'spo' ? `<p class="mt-0.5 text-xs font-medium text-gold-600 dark:text-gold-400">SPO çalışanı olarak eklenecek</p>` : ''}
+        </div>
         <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
       <form id="employee-form" data-id="${isEdit ? emp.id : ''}" class="space-y-4 px-6 py-5">
@@ -2522,7 +2605,16 @@ document.addEventListener('click', async (e) => {
     case 'toggle-theme': toggleTheme(); break;
     case 'logout': await fbAuth.signOut(); break;
     case 'close-modal': state.modal = null; render(); break;
-    case 'open-employee-form': state.modal = { type: 'employee', data: null }; render(); break;
+    case 'open-employee-form':
+      state.employeeFormGroup = 'standard';
+      state.modal = { type: 'employee', data: null };
+      render();
+      break;
+    case 'open-spo-employee-form':
+      state.employeeFormGroup = 'spo';
+      state.modal = { type: 'employee', data: null };
+      render();
+      break;
     case 'edit-employee': {
       const emp = state.employees.find(x => x.id === el.dataset.id);
       state.modal = { type: 'employee', data: emp }; render(); break;
@@ -2806,6 +2898,18 @@ document.addEventListener('input', (e) => {
       if (input) { input.focus(); input.setSelectionRange(caret, caret); }
     }
   }
+  if (e.target.id === 'spo-employee-search') {
+    state.spoEmployeeSearch = e.target.value;
+    const route = currentRoute();
+    if (route === '#/admin/spo-employees') {
+      const main = document.querySelector('main');
+      const caret = e.target.selectionStart;
+      main.innerHTML = adminSpoEmployeesView();
+      icons();
+      const input = document.getElementById('spo-employee-search');
+      if (input) { input.focus(); input.setSelectionRange(caret, caret); }
+    }
+  }
   if (e.target.classList.contains('bulk-cell')) {
     const idx = Number(e.target.dataset.row);
     const field = e.target.dataset.field;
@@ -2924,6 +3028,7 @@ document.addEventListener('submit', async (e) => {
           last_name: fd.get('last_name'),
           department,
           role: fd.get('is_admin') ? 'admin' : 'employee',
+          employee_group: state.employeeFormGroup === 'spo' ? 'spo' : 'standard',
           annual_leave_total: Number(fd.get('annual_leave_total')),
           flexible_work_note: fd.get('flexible_work_note'),
           flex_time_balance: Number(fd.get('flex_time_balance')) || 0,
