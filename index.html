@@ -1547,11 +1547,14 @@ function adminDashboardView() {
 
   ${deptEntries.length > 0 ? `
   <div class="mt-8">
-    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Departmanlara Göre Çalışan Sayısı</h2>
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      ${deptEntries.map(([name, count], i) =>
-        statCard('users', name, count, `toplam ${total} çalışanın ${Math.round((count / total) * 100)}%'i`, deptAccentOrder[i % 3], { action: 'show-department-employees', value: name })
-      ).join('')}
+    <h2 class="mb-3 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Departmanlara Göre Çalışan Sayısı</h2>
+    <div class="flex flex-wrap gap-2">
+      ${deptEntries.map(([name, count]) => `
+        <button data-action="show-department-employees" data-value="${escapeHtml(name)}"
+          class="inline-flex items-center gap-2.5 rounded-lg border border-black/5 dark:border-white/10 bg-white dark:bg-ink-800 pl-2.5 pr-3.5 py-2 text-left shadow-soft transition-colors hover:bg-sand-50 dark:hover:bg-ink-700">
+          <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300 text-xs font-bold">${count}</span>
+          <span class="text-sm font-medium text-ink-900 dark:text-sand-50 whitespace-nowrap">${escapeHtml(name)}</span>
+        </button>`).join('')}
     </div>
   </div>` : ''}
 
