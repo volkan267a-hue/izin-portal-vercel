@@ -193,7 +193,8 @@ function normalizeProfile(id, d) {
     deducted_hours_balance: d.deductedHoursBalance ?? 0,
     on_sick_leave: d.onSickLeave || false,
     sick_leave_end_date: d.sickLeaveEndDate || null,
-    employee_group: d.employeeGroup || 'standard'
+    employee_group: d.employeeGroup || 'standard',
+    is_usta: d.isUsta || false
   };
 }
 function normalizeAnnouncement(id, d) {
@@ -421,7 +422,8 @@ const state = {
   announcementAttachmentName: '',
   announcementAttachmentError: '',
   employeeFormGroup: 'standard',
-  spoEmployeeSearch: ''
+  spoEmployeeSearch: '',
+  teamEmployees: []
 };
 
 /* =====================================================================
@@ -581,6 +583,21 @@ async function loadEmployees() {
   }
 }
 
+async function loadTeamEmployees(department) {
+  try {
+    const snap = await db.collection('profiles')
+      .where('role', '==', 'employee')
+      .where('department', '==', department)
+      .get();
+    state.teamEmployees = snap.docs
+      .map(d => normalizeProfile(d.id, d.data()))
+      .sort((a, b) => (a.first_name || '').localeCompare(b.first_name || ''));
+  } catch (err) {
+    console.error('Ekip bilgileri alınamadı:', err.message);
+    state.teamEmployees = [];
+  }
+}
+
 async function loadAnnouncements() {
   try {
     const snap = await db.collection('announcements').orderBy('publishedAt', 'desc').get();
@@ -677,6 +694,15 @@ async function render() {
     subtitle = 'Güncel vardiya listesini görüntüleyin veya indirin';
     await loadShiftSchedule();
     content = employeeShiftsView();
+  } else if (route === '#/team') {
+    if (!state.profile.is_usta) {
+      location.hash = '#/dashboard';
+      return;
+    }
+    title = 'Ekibim';
+    subtitle = `${escapeHtml(state.profile.department)} departmanındaki çalışanlar`;
+    await loadTeamEmployees(state.profile.department);
+    content = employeeTeamView();
   } else if (route === '#/admin/shifts') {
     title = 'Vardiyalar';
     subtitle = 'Güncel vardiya planını PDF olarak yükleyin';
@@ -728,6 +754,9 @@ function shell(title, subtitle, content, role, route) {
     { href: '#/shifts', label: 'Vardiyalarım', icon: 'calendar-clock' },
     { href: '#/report', label: 'Öneri / Ramak Kala', icon: 'alert-triangle' }
   ];
+  if (state.profile?.is_usta) {
+    employeeLinks.splice(1, 0, { href: '#/team', label: 'Ekibim', icon: 'users' });
+  }
   const adminGroups = [
     {
       label: 'Genel',
@@ -1184,6 +1213,41 @@ function adminShiftsView() {
     </div>
     <iframe src="${s.fileDataUrl}" class="h-[70vh] w-full" title="Vardiya Planı Önizleme"></iframe>
   </div>` : ''}`;
+}
+
+/* =====================================================================
+   ÇALIŞAN (USTA) — EKİBİM
+   ===================================================================== */
+function employeeTeamView() {
+  const list = state.teamEmployees.filter(e => e.id !== state.profile.id);
+  return `
+  <div class="mb-5 rounded-lg bg-gold-500/10 px-4 py-3 text-xs text-gold-600 dark:text-gold-400">
+    <i data-lucide="info" class="inline w-3.5 h-3.5 mr-1 align-text-bottom"></i>
+    Bu liste salt okunurdur — sadece kendi departmanınızdaki çalışanların izin ve esnek bakiye bilgilerini görüntüleyebilirsiniz.
+  </div>
+  <div class="card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    ${list.length === 0
+      ? `<p class="p-8 text-center text-sm text-ink-800/50 dark:text-sand-100/45">Departmanınızda başka çalışan bulunamadı.</p>`
+      : `<table class="w-full min-w-[560px] text-left text-sm">
+          <thead class="bg-sand-50 dark:bg-ink-900"><tr class="text-[11px] font-semibold uppercase tracking-wider text-ink-800/45 dark:text-sand-100/40">
+            <th class="px-5 py-3.5">Ad Soyad</th>
+            <th class="px-5 py-3.5">Kalan / Toplam İzin</th>
+            <th class="px-5 py-3.5">Esnek Bakiye</th>
+            <th class="px-5 py-3.5">İzin Kullanımı</th>
+          </tr></thead>
+          <tbody class="divide-y divide-black/5 dark:divide-white/5">
+            ${list.map(e => `<tr>
+              <td class="px-5 py-3.5">
+                <p class="font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+                <p class="text-xs text-ink-800/45 dark:text-sand-100/40">Sicil No: ${escapeHtml(e.registry_number || '—')}</p>
+              </td>
+              <td class="px-5 py-3.5 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} / ${e.annual_leave_total} gün</td>
+              <td class="px-5 py-3.5 ${e.flex_time_balance < 0 ? 'text-brick-500' : 'text-ink-800/70 dark:text-sand-100/60'}">${fmtHours(e.flex_time_balance)}</td>
+              <td class="px-5 py-3.5">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`}
+  </div>`;
 }
 
 function employeeShiftsView() {
@@ -2116,6 +2180,10 @@ function employeeModal(emp) {
           </select>
           <input name="department_other" id="department-other" class="input mt-2 ${isEdit && emp.department && !['Kapı Hattı', 'Montaj Hattı', 'Hazırlama Hattı'].includes(emp.department) ? '' : 'hidden'}" placeholder="Departman adını yazın" value="${isEdit && emp.department && !['Kapı Hattı', 'Montaj Hattı', 'Hazırlama Hattı'].includes(emp.department) ? escapeHtml(emp.department) : ''}" />
         </div>
+        <label class="flex items-center gap-2.5 rounded-lg border border-dashed border-black/10 dark:border-white/10 p-3.5">
+          <input type="checkbox" name="is_usta" id="is-usta-checkbox" ${isEdit && emp.is_usta ? 'checked' : ''} class="h-4 w-4 rounded border-black/20 text-pine-600 focus:ring-pine-500" />
+          <span class="text-sm text-ink-800 dark:text-sand-100"><strong>Usta</strong> yetkisi ver (kendi departmanındaki çalışanların izin/esnek bakiye bilgilerini salt okunur görebilir)</span>
+        </label>
         <div class="grid grid-cols-2 gap-4">
           <div><label class="label">Yıllık İzin Hakkı (gün)</label><input name="annual_leave_total" type="number" min="0" required class="input" value="${isEdit ? emp.annual_leave_total : 14}" /></div>
           ${isEdit ? `<div><label class="label">Kullanılan İzin (gün)</label><input name="annual_leave_used" type="number" min="0" required class="input" value="${emp.annual_leave_used}" /></div>` : ''}
@@ -3013,7 +3081,8 @@ document.addEventListener('submit', async (e) => {
           annualLeaveUsed: Number(fd.get('annual_leave_used')),
           flexibleWorkNote: fd.get('flexible_work_note'),
           flexTimeBalance: Number(fd.get('flex_time_balance')) || 0,
-          deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0
+          deductedHoursBalance: Number(fd.get('deducted_hours_balance')) || 0,
+          isUsta: fd.get('is_usta') === 'on'
         });
 
         const newPassword = fd.get('new_password');
@@ -3032,6 +3101,7 @@ document.addEventListener('submit', async (e) => {
           department,
           role: fd.get('is_admin') ? 'admin' : 'employee',
           employee_group: state.employeeFormGroup === 'spo' ? 'spo' : 'standard',
+          is_usta: fd.get('is_usta') === 'on',
           annual_leave_total: Number(fd.get('annual_leave_total')),
           flexible_work_note: fd.get('flexible_work_note'),
           flex_time_balance: Number(fd.get('flex_time_balance')) || 0,
