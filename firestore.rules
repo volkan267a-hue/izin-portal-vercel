@@ -11,6 +11,16 @@ service cloud.firestore {
         get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == 'admin';
     }
 
+    // Usta yetkisi: kendi departmanındaki diğer çalışanların bilgilerini
+    // (salt okunur) görebilir. myProfile() aynı istek içinde tekrar tekrar
+    // çağrılsa da Firestore aynı get() sonucunu önbellekte tutar.
+    function myProfile() {
+      return get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data;
+    }
+    function isUstaForDepartment(dept) {
+      return isSignedIn() && myProfile().isUsta == true && myProfile().department == dept;
+    }
+
     // Sicil numarasından e-postayı bulmak için giriş ekranının OTURUM AÇMADAN ÖNCE
     // okuyabilmesi gerekiyor. Sadece "get" (tekil, ID ile) izinli; "list" (tüm
     // koleksiyonu tarama) kapalı, böylece kimse tüm sicil no listesini çekemez.
@@ -22,8 +32,8 @@ service cloud.firestore {
     }
 
     match /profiles/{uid} {
-      allow get: if isSignedIn() && (request.auth.uid == uid || isAdmin());
-      allow list: if isAdmin();
+      allow get: if isSignedIn() && (request.auth.uid == uid || isAdmin() || isUstaForDepartment(resource.data.department));
+      allow list: if isAdmin() || (isSignedIn() && myProfile().isUsta == true && resource.data.department == myProfile().department);
       allow update: if isAdmin();
       allow delete: if false; // silme işlemi Netlify Function üzerinden (Auth kullanıcısını da temizlemek için)
       allow create: if false; // oluşturma sadece Netlify Function (Admin SDK) ile
@@ -54,6 +64,20 @@ service cloud.firestore {
     // çalışan sadece kendi kayıtlarını görebilir.
     match /leaveEntries/{entryId} {
       allow read: if isSignedIn() && (resource.data.employeeId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Sağlık raporu kayıtları (geçmiş + gelecek): admin ekler/yönetir,
+    // çalışan sadece kendi kayıtlarını görebilir.
+    match /sickLeaveEntries/{entryId} {
+      allow read: if isSignedIn() && (resource.data.employeeId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    // Güncel vardiya planı (PDF): tüm giriş yapmış kullanıcılar okuyabilir,
+    // sadece admin yükleyip silebilir.
+    match /shiftSchedule/{docId} {
+      allow read: if isSignedIn();
       allow write: if isAdmin();
     }
   }
