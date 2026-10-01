@@ -163,7 +163,6 @@ const firebaseConfig = {
   appId: "1:1073816187669:web:40a73a49133f5f1caeef1c"
 };
 
-
 // Bu site Vercel'e yüklendiğinde admin işlemleri (çalışan ekleme, toplu içeri
 // aktarma, çalışan silme, şifre değiştirme) aynı sitedeki /api fonksiyonlarını
 // kullanır — değiştirmenize gerek yok, boş bırakılırsa otomatik olarak
@@ -699,7 +698,7 @@ async function render() {
   } else if (route === '#/admin') {
     title = 'Genel Bakış';
     subtitle = 'Yönetici Paneli';
-    await Promise.all([loadEmployees(), loadAnnouncements(), loadAllLeaveEntries(), loadAllSickLeaveEntries(), loadLockdownStatus()]);
+    await Promise.all([loadEmployees(), loadAnnouncements(), loadAllLeaveEntries(), loadAllSickLeaveEntries(), loadLockdownStatus(), loadAllReports(), loadAllPeriodicChecks()]);
     content = adminDashboardView();
   } else if (route === '#/admin/employees') {
     title = 'Çalışanlar';
@@ -1645,7 +1644,27 @@ function adminDashboardView() {
     deptCounts[d] = (deptCounts[d] || 0) + 1;
   });
   const deptEntries = Object.entries(deptCounts).sort((a, b) => b[1] - a[1]);
-  const deptAccentOrder = ['pine', 'gold', 'brick'];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const sickToday = state.allSickLeaveEntries
+    .filter(l => l.start_date && l.end_date && l.start_date <= today && today <= l.end_date)
+    .map(l => ({ ...l, kind: 'rapor' }));
+  const leaveToday = state.allLeaveEntries
+    .filter(l => l.start_date && l.end_date && l.start_date <= today && today <= l.end_date)
+    .map(l => ({ ...l, kind: 'izin' }));
+  const absentToday = [...sickToday, ...leaveToday].sort((a, b) => a.employee_name.localeCompare(b.employee_name));
+
+  const pendingReports = state.allReports.filter(r => r.status === 'yeni');
+  const recentReports = [...state.allReports]
+    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .slice(0, 5);
+
+  const sevenDaysFromNow = new Date(); sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
+  const sevenDaysStr = sevenDaysFromNow.toISOString().slice(0, 10);
+  const upcomingChecks = state.periodicChecks
+    .filter(c => c.status !== 'tamamlandi' && c.due_date && c.due_date <= sevenDaysStr)
+    .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0))
+    .slice(0, 6);
 
   const rows = employees.map(e => `
     <tr>
@@ -1673,9 +1692,16 @@ function adminDashboardView() {
 
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     ${statCard('users', 'Toplam Çalışan', total, '', 'pine')}
+    ${statCard('trending-up', 'Departman Sayısı', departments, '', 'pine')}
     ${statCard('palmtree', 'Ort. İzin Kullanım Oranı', '%' + avgUsage, '', 'gold')}
     ${statCard('megaphone', 'Toplam Duyuru', state.announcements.length, '', 'brick')}
-    ${statCard('trending-up', 'Departman Sayısı', departments, '', 'pine')}
+  </div>
+
+  <h2 class="mb-3 mt-8 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Bugün Dikkat Edilmesi Gerekenler</h2>
+  <div class="grid gap-4 sm:grid-cols-3">
+    ${statCard('calendar-x', 'Bugün Devamsız', absentToday.length, `${sickToday.length} rapor · ${leaveToday.length} izin`, 'brick', { action: 'scroll-to', value: 'bugun-devamsiz' })}
+    ${statCard('alert-triangle', 'Bekleyen Bildirim', pendingReports.length, 'durumu "Yeni" olan', 'gold', { action: 'nav-to', value: '#/admin/reports' })}
+    ${statCard('stethoscope', 'Yaklaşan Kontrol (7 gün)', upcomingChecks.length, 'periyodik kontrol / eğitim', 'pine', { action: 'nav-to', value: '#/admin/periodic-checks' })}
   </div>
 
   ${deptEntries.length > 0 ? `
@@ -1690,6 +1716,73 @@ function adminDashboardView() {
         </button>`).join('')}
     </div>
   </div>` : ''}
+
+  <div id="bugun-devamsiz" class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Bugün Kimler Yok?</h2>
+    ${absentToday.length === 0
+      ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Bugün izinli veya raporlu çalışan yok.</p>`
+      : `<div class="mt-4 max-h-80 overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
+          ${absentToday.map(l => `
+            <div class="flex items-center justify-between gap-3 py-2.5">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.employee_name)}</p>
+                <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.department || '')} · ${escapeHtml(l.end_date)}'e kadar</p>
+              </div>
+              <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${l.kind === 'rapor' ? 'bg-brick-500/10 text-brick-600' : 'bg-gold-500/10 text-gold-600 dark:text-gold-400'}">${l.kind === 'rapor' ? 'Raporlu' : 'İzinli'}</span>
+            </div>`).join('')}
+        </div>`}
+  </div>
+
+  <div class="mt-8">
+    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Çalışanlar</h2>
+    ${panelSectionHtmlInner(employees)}
+  </div>
+
+  <div class="mt-8 grid gap-5 lg:grid-cols-2">
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex items-center justify-between">
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Son Bildirimler</h2>
+        <a href="#/admin/reports" class="flex items-center gap-1 text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline">
+          Tümü <i data-lucide="arrow-right" class="w-[12px] h-[12px]"></i>
+        </a>
+      </div>
+      ${recentReports.length === 0
+        ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz bildirim yok.</p>`
+        : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+            ${recentReports.map(r => `
+              <div class="py-2.5">
+                <div class="flex items-center justify-between gap-2">
+                  <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(r.submitter_name || 'Bilinmiyor')}</p>
+                  <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_COLORS[r.status] || STATUS_COLORS.yeni}">${STATUS_LABELS[r.status] || r.status}</span>
+                </div>
+                <p class="mt-0.5 text-xs text-ink-800/45 dark:text-sand-100/40">${REPORT_TYPE_LABELS[r.type] || r.type} · Risk: ${RISK_LABELS[r.risk_level] || r.risk_level}</p>
+              </div>`).join('')}
+          </div>`}
+    </div>
+
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex items-center justify-between">
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yaklaşan Periyodik Kontroller</h2>
+        <a href="#/admin/periodic-checks" class="flex items-center gap-1 text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline">
+          Tümü <i data-lucide="arrow-right" class="w-[12px] h-[12px]"></i>
+        </a>
+      </div>
+      ${upcomingChecks.length === 0
+        ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Önümüzdeki 7 günde yaklaşan kontrol yok.</p>`
+        : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+            ${upcomingChecks.map(c => `
+              <div class="flex items-center justify-between gap-2 py-2.5">
+                <div class="min-w-0">
+                  <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(c.employee_name)}</p>
+                  <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)} · ${escapeHtml(c.due_date)}</p>
+                </div>
+                <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+              </div>`).join('')}
+          </div>`}
+    </div>
+  </div>
+
+  ${flexBalanceChartHtml(employees)}
 
   <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <div class="flex items-center justify-between">
@@ -1711,10 +1804,7 @@ function adminDashboardView() {
             <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
           </table>
         </div>`}
-  </div>
-
-  ${panelSectionHtml(employees)}
-  ${flexBalanceChartHtml(employees)}`;
+  </div>`;
 }
 
 function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn, nameFn) {
@@ -1747,7 +1837,7 @@ function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn, nameF
   </div>`;
 }
 
-function panelSectionHtml(employees) {
+function panelSectionHtmlInner(employees) {
   const lowLeave = employees
     .filter(e => {
       const remaining = e.annual_leave_total - e.annual_leave_used;
@@ -1759,19 +1849,8 @@ function panelSectionHtml(employees) {
     .sort((a, b) => (a.flex_time_balance ?? 0) - (b.flex_time_balance ?? 0))
     .slice(0, 8);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const sickLeaveToday = state.allSickLeaveEntries.filter(l =>
-    l.start_date && l.end_date && l.start_date <= today && today <= l.end_date
-  );
-
-  const onLeaveToday = state.allLeaveEntries.filter(l =>
-    l.start_date && l.end_date && l.start_date <= today && today <= l.end_date
-  );
-
   return `
-  <div class="mt-8">
-    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Çalışanlar</h2>
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div class="grid gap-4 sm:grid-cols-2">
       ${miniEmployeePanel(
         'Yıllık İzni Azalanlar (0-5 gün)', 'palmtree', 'brick', lowLeave,
         'Yıllık izni 5 gün veya altına düşen çalışan yok.',
@@ -1782,20 +1861,7 @@ function panelSectionHtml(employees) {
         'Esnek bakiye bilgisi olan çalışan yok.',
         e => fmtHours(e.flex_time_balance)
       )}
-      ${miniEmployeePanel(
-        'Bugün Raporlu Olanlar', 'stethoscope', 'pine', sickLeaveToday,
-        'Şu an raporlu çalışan yok.',
-        l => l.end_date,
-        l => l.employee_name
-      )}
-      ${miniEmployeePanel(
-        'Bugün İzinli Olanlar', 'calendar-off', 'brick', onLeaveToday,
-        'Bugün yıllık izinde olan çalışan yok.',
-        l => l.end_date,
-        l => l.employee_name
-      )}
-    </div>
-  </div>`;
+    </div>`;
 }
 
 /* =====================================================================
@@ -2844,6 +2910,14 @@ document.addEventListener('click', async (e) => {
       state.employeeActionsMenuOpen = false;
       await exportEmployeesToExcel();
       render();
+      break;
+    case 'scroll-to': {
+      const target = document.getElementById(el.dataset.value);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      break;
+    }
+    case 'nav-to':
+      location.hash = el.dataset.value;
       break;
     case 'toggle-lockdown': {
       const next = !state.lockdownEnabled;
