@@ -444,7 +444,8 @@ const state = {
   spoEmployeeSearch: '',
   teamEmployees: [],
   lockdownEnabled: false,
-  lockdownChecked: false
+  lockdownChecked: false,
+  periodicCheckFormCategory: 'health'
 };
 
 /* =====================================================================
@@ -470,6 +471,18 @@ function fmtHours(n) {
   const str = num.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   return `${str} saat`;
 }
+
+const TR_MONTHS_SHORT = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+function fmtShortDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T00:00:00');
+  if (isNaN(d.getTime())) return dateStr;
+  return `${String(d.getDate()).padStart(2, '0')} ${TR_MONTHS_SHORT[d.getMonth()]}`;
+}
+const STATUS_EMOJI = {
+  tamamlandi: '🟢', yaklasiyor: '🟠', gecikti: '🔴',
+  revire_gitmeli: '🔴', hastaneye_gitmeli: '🔴', takip_gereken: '🟡'
+};
 
 // Bir fotoğraf dosyasını tarayıcıda küçültüp base64'e çevirir (Firestore belge
 // boyutu sınırı 1MB olduğu için; ayrıca ücretli Storage aboneliği gerekmez).
@@ -674,7 +687,7 @@ async function render() {
     }
   }
 
-  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/spo-employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks', '#/admin/shifts'];
+  const adminRoutes = ['#/admin', '#/admin/employees', '#/admin/spo-employees', '#/admin/import', '#/admin/announcements', '#/admin/reports', '#/admin/periodic-checks', '#/admin/trainings', '#/admin/shifts'];
   const isEmployeeDetailRoute = route.startsWith('#/admin/employee/');
 
   if ((adminRoutes.includes(route) || isEmployeeDetailRoute) && role !== 'admin') {
@@ -756,10 +769,15 @@ async function render() {
     subtitle = `${state.allReports.length} bildirim`;
     content = adminReportsView();
   } else if (route === '#/admin/periodic-checks') {
-    title = 'Periyodik Kontroller';
+    title = 'Sağlık Kontrolleri';
     await Promise.all([loadEmployees(), loadAllPeriodicChecks()]);
-    subtitle = `${state.periodicChecks.length} kayıtlı kontrol`;
-    content = adminPeriodicChecksView();
+    subtitle = `${state.periodicChecks.filter(c => c.check_type !== 'egitim').length} kayıtlı kontrol`;
+    content = adminPeriodicChecksView('health');
+  } else if (route === '#/admin/trainings') {
+    title = 'Eğitimler';
+    await Promise.all([loadEmployees(), loadAllPeriodicChecks()]);
+    subtitle = `${state.periodicChecks.filter(c => c.check_type === 'egitim').length} kayıtlı eğitim`;
+    content = adminPeriodicChecksView('egitim');
   } else {
     location.hash = role === 'admin' ? '#/admin' : '#/dashboard';
     return;
@@ -821,7 +839,8 @@ function shell(title, subtitle, content, role, route) {
         { href: '#/admin/employees', label: 'Çalışanlar', icon: 'users' },
         { href: '#/admin/spo-employees', label: 'SPO Çalışanları', icon: 'user-cog' },
         { href: '#/admin/import', label: 'Toplu Ekleme', icon: 'upload-cloud' },
-        { href: '#/admin/periodic-checks', label: 'Periyodik Kontroller', icon: 'stethoscope' },
+        { href: '#/admin/periodic-checks', label: 'Sağlık Kontrolleri', icon: 'stethoscope' },
+        { href: '#/admin/trainings', label: 'Eğitimler', icon: 'graduation-cap' },
         { href: '#/admin/shifts', label: 'Vardiyalar', icon: 'calendar-clock' }
       ]
     },
@@ -1094,7 +1113,7 @@ function employeeDashboardView() {
     </div>
   </div>` : ''}
 
-  ${state.myPeriodicChecks.length > 0 ? `
+  ${state.myPeriodicChecks.filter(c => c.check_type !== 'egitim').length > 0 ? `
   <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <div class="flex items-center gap-3">
       <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300">
@@ -1106,10 +1125,35 @@ function employeeDashboardView() {
       </div>
     </div>
     <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
-      ${state.myPeriodicChecks.map(c => `
+      ${state.myPeriodicChecks.filter(c => c.check_type !== 'egitim').map(c => `
         <div class="flex flex-wrap items-center justify-between gap-3 py-3">
           <div class="min-w-0">
             <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</p>
+            <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(c.due_date)}</p>
+          </div>
+          <div class="flex shrink-0 items-center gap-2">
+            <span class="text-xs text-ink-800/55 dark:text-sand-100/50 whitespace-nowrap">${fmtDaysDiff(c.due_date)}</span>
+            <span class="rounded-full px-2.5 py-1 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+          </div>
+        </div>`).join('')}
+    </div>
+  </div>` : ''}
+
+  ${state.myPeriodicChecks.filter(c => c.check_type === 'egitim').length > 0 ? `
+  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex items-center gap-3">
+      <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-500/10 text-gold-600 dark:text-gold-400">
+        <i data-lucide="graduation-cap" class="w-[18px] h-[18px]"></i>
+      </div>
+      <div>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Eğitimlerim</h2>
+        <p class="text-xs text-ink-800/50 dark:text-sand-100/45">Yönetici tarafından takip edilen eğitim tarihleriniz</p>
+      </div>
+    </div>
+    <div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+      ${state.myPeriodicChecks.filter(c => c.check_type === 'egitim').map(c => `
+        <div class="flex flex-wrap items-center justify-between gap-3 py-3">
+          <div class="min-w-0">
             <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${escapeHtml(c.due_date)}</p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
@@ -1475,8 +1519,13 @@ function adminReportsView() {
 /* =====================================================================
    ADMIN — PERİYODİK KONTROLLER
    ===================================================================== */
-function adminPeriodicChecksView() {
-  const checks = state.periodicChecks;
+function adminPeriodicChecksView(category) {
+  const checks = category === 'egitim'
+    ? state.periodicChecks.filter(c => c.check_type === 'egitim')
+    : state.periodicChecks.filter(c => c.check_type !== 'egitim');
+  const pageTitle = category === 'egitim' ? 'Tüm Eğitimler' : 'Tüm Sağlık Kontrolleri';
+  const addLabel = category === 'egitim' ? 'Yeni Eğitim Ekle' : 'Yeni Kontrol Ekle';
+  const addAction = category === 'egitim' ? 'open-training-form' : 'open-periodic-check-form';
   const counts = {
     total: checks.length,
     tamamlandi: checks.filter(c => c.status === 'tamamlandi').length,
@@ -1497,33 +1546,34 @@ function adminPeriodicChecksView() {
     </div>`;
 
   return `
-  <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-    ${summaryCard('clipboard-list', 'Toplam Kontrol', counts.total)}
+  <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 ${category === 'egitim' ? '' : 'lg:grid-cols-7'}">
+    ${summaryCard('clipboard-list', category === 'egitim' ? 'Toplam Eğitim' : 'Toplam Kontrol', counts.total)}
     ${summaryCard('check-circle-2', 'Tamamlanan', counts.tamamlandi)}
     ${summaryCard('alert-triangle', 'Yaklaşan', counts.yaklasiyor)}
     ${summaryCard('x-circle', 'Geciken', counts.gecikti)}
+    ${category === 'egitim' ? '' : `
     ${summaryCard('heart', 'Revire Gitmesi Gereken', counts.revire_gitmeli)}
     ${summaryCard('shield', 'Hastaneye Gitmesi Gereken', counts.hastaneye_gitmeli)}
-    ${summaryCard('clock', 'Takip Gereken', counts.takip_gereken)}
+    ${summaryCard('clock', 'Takip Gereken', counts.takip_gereken)}`}
   </div>
 
   <div class="mb-5 flex justify-end">
-    <button data-action="open-periodic-check-form" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
-      <i data-lucide="plus" class="w-4 h-4"></i> Yeni Kontrol Ekle
+    <button data-action="${addAction}" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">
+      <i data-lucide="plus" class="w-4 h-4"></i> ${addLabel}
     </button>
   </div>
 
   <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
-    <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Periyodik Kontroller</h2>
+    <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">${category === 'egitim' ? 'Dikkat Gereken Eğitimler' : 'Dikkat Gereken Periyodik Kontroller'}</h2>
     ${needsAttention.length === 0
-      ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Dikkat gereken bir kontrol yok.</p>`
+      ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Dikkat gereken bir kayıt yok.</p>`
       : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
           ${needsAttention.map(c => periodicCheckRow(c)).join('')}
         </div>`}
   </div>
 
   <div class="mt-8 card overflow-x-auto bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
-    <div class="px-6 pt-6"><h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Tüm Kontroller</h2></div>
+    <div class="px-6 pt-6"><h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">${pageTitle}</h2></div>
     ${checks.length === 0
       ? `<p class="p-6 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz kontrol eklenmedi.</p>`
       : `<table class="mt-4 w-full min-w-[720px] text-left text-sm">
@@ -1615,7 +1665,7 @@ function flexBalanceChartHtml(allEmployees) {
   }).join('');
 
   return `
-  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+  <div id="esnek-bakiye-dagilimi" class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Bakiye Dağılımı</h2>
     <p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Sıfır çizgisinin solu borç, sağı alacak</p>
     <div class="mt-4 flex flex-wrap gap-2">
@@ -1656,33 +1706,128 @@ function adminDashboardView() {
 
   const pendingReports = state.allReports.filter(r => r.status === 'yeni');
   const recentReports = [...state.allReports]
-    .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    .sort((a, b) => {
+      const aPending = a.status === 'yeni' ? 0 : 1;
+      const bPending = b.status === 'yeni' ? 0 : 1;
+      if (aPending !== bPending) return aPending - bPending;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    })
     .slice(0, 5);
 
   const sevenDaysFromNow = new Date(); sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
   const sevenDaysStr = sevenDaysFromNow.toISOString().slice(0, 10);
-  const upcomingChecks = state.periodicChecks
+  const upcomingAll = state.periodicChecks
     .filter(c => c.status !== 'tamamlandi' && c.due_date && c.due_date <= sevenDaysStr)
-    .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0))
-    .slice(0, 6);
+    .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0));
+  const upcomingHealthAll = upcomingAll.filter(c => c.check_type !== 'egitim');
+  const upcomingTrainingsAll = upcomingAll.filter(c => c.check_type === 'egitim');
+  const upcomingHealth = upcomingHealthAll.slice(0, 6);
+  const upcomingTrainings = upcomingTrainingsAll.slice(0, 6);
 
-  const rows = employees.map(e => `
-    <tr>
-      <td class="py-3 pr-3 font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</td>
-      <td class="py-3 pr-3 text-ink-800/70 dark:text-sand-100/60">${escapeHtml(e.department)}</td>
-      <td class="py-3 pr-3 text-ink-800/70 dark:text-sand-100/60 whitespace-nowrap">${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} / ${e.annual_leave_total} gün</td>
-      <td class="py-3">${leaveBar(e.annual_leave_total, e.annual_leave_used, true)}</td>
-    </tr>`).join('');
+  const negativeFlex = employees
+    .filter(e => (e.flex_time_balance ?? 0) < 0)
+    .sort((a, b) => (a.flex_time_balance ?? 0) - (b.flex_time_balance ?? 0));
+  const negativeFlexTotal = negativeFlex.reduce((s, e) => s + Math.abs(e.flex_time_balance ?? 0), 0);
+
+  const lowLeaveEmployees = employees
+    .filter(e => {
+      const remaining = e.annual_leave_total - e.annual_leave_used;
+      return remaining >= 0 && remaining <= 5;
+    })
+    .sort((a, b) => (a.annual_leave_total - a.annual_leave_used) - (b.annual_leave_total - b.annual_leave_used));
+
+  const sevenDaysAgo = new Date(); sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const newAnnouncementsCount = state.announcements.filter(a => a.published_at && new Date(a.published_at) >= sevenDaysAgo).length;
+
+  // --- "Bugün" aksiyon merkezi ---
+  const severityMeta = {
+    kritik: { emoji: '🔴', label: 'Kritik', badge: 'bg-brick-500/10 text-brick-600', border: 'border-brick-500/30' },
+    oncelikli: { emoji: '🟠', label: 'Öncelikli', badge: 'bg-gold-500/10 text-gold-600 dark:text-gold-400', border: 'border-gold-500/30 dark:border-gold-500/20' },
+    takip: { emoji: '🟡', label: 'Takip', badge: 'bg-gold-500/10 text-gold-600 dark:text-gold-400', border: 'border-black/5 dark:border-white/10' },
+    bilgi: { emoji: '🟢', label: 'Bilgi', badge: 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300', border: 'border-black/5 dark:border-white/10' }
+  };
+  const actionItems = [];
+  if (state.lockdownEnabled) {
+    actionItems.push({ severity: 'kritik', title: 'Çalışan erişimi kapalı', desc: `${total} çalışan etkileniyor`, actionLabel: 'İncele', action: 'toggle-lockdown' });
+  }
+  if (negativeFlex.length > 0) {
+    actionItems.push({ severity: 'oncelikli', title: 'Negatif esnek bakiye bulunan çalışanlar', desc: `${negativeFlex.length} çalışan · toplam açık ${fmtHours(negativeFlexTotal)}`, actionLabel: 'Çalışanları Gör', action: 'scroll-to', value: 'esnek-bakiye-acigi' });
+  }
+  if (upcomingAll.length > 0) {
+    actionItems.push({ severity: 'oncelikli', title: `${upcomingAll.length} kontrol/eğitim önümüzdeki 7 gün içinde`, desc: `${upcomingHealthAll.length} sağlık kontrolü · ${upcomingTrainingsAll.length} eğitim`, actionLabel: 'Planla', action: 'scroll-to', value: 'yaklasan-kontroller' });
+  }
+  if (pendingReports.length > 0) {
+    actionItems.push({ severity: 'takip', title: `${pendingReports.length} bekleyen bildirim`, desc: 'durumu "Yeni" olan öneri/ramak kala bildirimi', actionLabel: 'İncele', action: 'scroll-to', value: 'yaklasan-kontroller' });
+  }
+  if (lowLeaveEmployees.length > 0) {
+    actionItems.push({ severity: 'bilgi', title: `${lowLeaveEmployees.length} çalışanın yıllık izni azalıyor`, desc: 'Kalan izni 0-5 gün arasında', actionLabel: 'Detay', action: 'scroll-to', value: 'dikkat-gereken' });
+  }
+  const actionButton = (item) => {
+    if (item.action === 'toggle-lockdown') {
+      return `<button data-action="toggle-lockdown" class="shrink-0 rounded-lg bg-pine-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-pine-700">${item.actionLabel}</button>`;
+    }
+    return `<button data-action="${item.action}" data-value="${escapeHtml(item.value)}" class="shrink-0 rounded-lg bg-sand-100 dark:bg-ink-700 px-3.5 py-2 text-xs font-medium text-ink-800 dark:text-sand-100 hover:bg-sand-200 dark:hover:bg-ink-600">${item.actionLabel}</button>`;
+  };
+
+  // Departman chip'leri için hover özet bilgisi (bugün izinli/raporlu + yaklaşan kontrol + negatif bakiye)
+  const deptHoverInfo = (name) => {
+    const inDept = (id) => employees.find(e => e.id === id && e.department === name);
+    const izinli = leaveToday.filter(l => inDept(l.employee_id)).length;
+    const raporlu = sickToday.filter(l => inDept(l.employee_id)).length;
+    const yaklasanKontrol = upcomingAll.filter(c => c.department === name).length;
+    const kritikBakiye = negativeFlex.filter(e => e.department === name).length;
+    return `İzinli: ${izinli} · Raporlu: ${raporlu} · Yaklaşan kontrol: ${yaklasanKontrol} · Kritik bakiye: ${kritikBakiye}`;
+  };
+
+  if (total === 0) {
+    return `
+    <div class="card p-10 text-center bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-sand-100 dark:bg-ink-700 text-ink-800/40 dark:text-sand-100/40">
+        <i data-lucide="users" class="w-6 h-6"></i>
+      </div>
+      <p class="mt-4 text-sm font-medium text-ink-900 dark:text-sand-50">Henüz çalışan eklenmedi</p>
+      <p class="mt-1 text-sm text-ink-800/50 dark:text-sand-100/45">Başlamak için "Çalışanlar" sayfasından ilk çalışanınızı ekleyin.</p>
+      <a href="#/admin/employees" class="mt-5 inline-flex items-center justify-center gap-2 rounded-lg bg-pine-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-pine-700">
+        <i data-lucide="plus" class="w-4 h-4"></i> Çalışanlar Sayfasına Git
+      </a>
+    </div>`;
+  }
 
   return `
-  <div class="mb-5 flex items-center justify-between gap-4 rounded-xl2 border px-5 py-4 ${state.lockdownEnabled ? 'border-brick-500/30 bg-brick-500/10' : 'border-black/5 dark:border-white/10 bg-white dark:bg-ink-800'}">
+  <!-- 1. BUGÜN — Aksiyon Merkezi -->
+  <div class="mb-6 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex flex-wrap items-baseline justify-between gap-2">
+      <h2 class="font-display text-lg font-bold text-ink-900 dark:text-sand-50">Bugün</h2>
+      <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${total} çalışan · ${absentToday.length} devamsızlık · ${upcomingAll.length} yaklaşan kontrol · ${negativeFlex.length} kritik bakiye</p>
+    </div>
+    ${actionItems.length === 0
+      ? `<div class="mt-5 flex items-center gap-2.5 rounded-lg bg-pine-50 dark:bg-pine-900/20 px-4 py-3 text-sm text-pine-700 dark:text-pine-300">
+          <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i> Bugün için kritik bir durum yok, her şey yolunda.
+        </div>`
+      : `<div class="mt-5 space-y-2.5">
+          ${actionItems.map(item => `
+            <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border ${severityMeta[item.severity].border} px-4 py-3">
+              <div class="flex items-start gap-3 min-w-0">
+                <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${severityMeta[item.severity].badge}">${severityMeta[item.severity].emoji} ${severityMeta[item.severity].label}</span>
+                <div class="min-w-0">
+                  <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${item.title}</p>
+                  <p class="text-xs text-ink-800/50 dark:text-sand-100/45">${item.desc}</p>
+                </div>
+              </div>
+              ${actionButton(item)}
+            </div>`).join('')}
+        </div>`}
+  </div>
+
+  <!-- 2. Çalışan Erişimi -->
+  <div class="mb-6 flex items-center justify-between gap-4 rounded-xl2 border px-5 py-4 ${state.lockdownEnabled ? 'border-brick-500/30 bg-brick-500/10' : 'border-black/5 dark:border-white/10 bg-white dark:bg-ink-800'}">
     <div class="flex items-center gap-3">
       <div class="flex h-10 w-10 items-center justify-center rounded-lg ${state.lockdownEnabled ? 'bg-brick-500/15 text-brick-600' : 'bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300'}">
         <i data-lucide="${state.lockdownEnabled ? 'lock' : 'unlock'}" class="w-[18px] h-[18px]"></i>
       </div>
       <div>
-        <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">Çalışan Erişimi ${state.lockdownEnabled ? '— Kilitli' : '— Açık'}</p>
-        <p class="text-xs text-ink-800/55 dark:text-sand-100/50">${state.lockdownEnabled ? 'Yönetici dışındaki tüm kullanıcılar şu an sisteme giremiyor.' : 'Tüm kullanıcılar normal şekilde erişebiliyor.'}</p>
+        <p class="text-sm font-semibold text-ink-900 dark:text-sand-50">Çalışan Erişimi ${state.lockdownEnabled ? '🔴 Kilitli' : '— Açık'}</p>
+        <p class="text-xs text-ink-800/55 dark:text-sand-100/50">${state.lockdownEnabled ? `${total} çalışan şu anda sisteme giriş yapamıyor.` : 'Tüm kullanıcılar normal şekilde erişebiliyor.'}</p>
       </div>
     </div>
     <button data-action="toggle-lockdown" class="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium ${state.lockdownEnabled ? 'bg-pine-600 text-white hover:bg-pine-700' : 'bg-brick-500 text-white hover:bg-brick-600'}">
@@ -1690,26 +1835,21 @@ function adminDashboardView() {
     </button>
   </div>
 
+  <!-- 3. Operasyonel Özet -->
   <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    ${statCard('users', 'Toplam Çalışan', total, '', 'pine')}
-    ${statCard('trending-up', 'Departman Sayısı', departments, '', 'pine')}
+    ${statCard('users', 'Toplam Çalışan', total, `Aktif: ${total - absentToday.length} · İzin/Rapor: ${absentToday.length}`, 'pine')}
+    ${statCard('trending-up', 'Departman Sayısı', departments, 'Aktif departman', 'pine')}
     ${statCard('palmtree', 'Ort. İzin Kullanım Oranı', '%' + avgUsage, '', 'gold')}
-    ${statCard('megaphone', 'Toplam Duyuru', state.announcements.length, '', 'brick')}
+    ${statCard('megaphone', 'Toplam Duyuru', state.announcements.length, `Yeni (7 gün): ${newAnnouncementsCount}`, 'brick')}
   </div>
 
-  <h2 class="mb-3 mt-8 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Bugün Dikkat Edilmesi Gerekenler</h2>
-  <div class="grid gap-4 sm:grid-cols-3">
-    ${statCard('calendar-x', 'Bugün Devamsız', absentToday.length, `${sickToday.length} rapor · ${leaveToday.length} izin`, 'brick', { action: 'scroll-to', value: 'bugun-devamsiz' })}
-    ${statCard('alert-triangle', 'Bekleyen Bildirim', pendingReports.length, 'durumu "Yeni" olan', 'gold', { action: 'nav-to', value: '#/admin/reports' })}
-    ${statCard('stethoscope', 'Yaklaşan Kontrol (7 gün)', upcomingChecks.length, 'periyodik kontrol / eğitim', 'pine', { action: 'nav-to', value: '#/admin/periodic-checks' })}
-  </div>
-
+  <!-- 4. Departman Durumu -->
   ${deptEntries.length > 0 ? `
   <div class="mt-8">
     <h2 class="mb-3 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Departmanlara Göre Çalışan Sayısı</h2>
     <div class="flex flex-wrap gap-2">
       ${deptEntries.map(([name, count]) => `
-        <button data-action="show-department-employees" data-value="${escapeHtml(name)}"
+        <button data-action="show-department-employees" data-value="${escapeHtml(name)}" title="${escapeHtml(deptHoverInfo(name))}"
           class="inline-flex items-center gap-2.5 rounded-lg border border-black/5 dark:border-white/10 bg-white dark:bg-ink-800 pl-2.5 pr-3.5 py-2 text-left shadow-soft transition-colors hover:bg-sand-50 dark:hover:bg-ink-700">
           <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-pine-50 text-pine-700 dark:bg-pine-900/40 dark:text-pine-300 text-xs font-bold">${count}</span>
           <span class="text-sm font-medium text-ink-900 dark:text-sand-50 whitespace-nowrap">${escapeHtml(name)}</span>
@@ -1717,28 +1857,67 @@ function adminDashboardView() {
     </div>
   </div>` : ''}
 
+  <!-- 5. Negatif Esnek Bakiye -->
+  <div id="esnek-bakiye-acigi" class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Esnek Bakiye Açığı</h2>
+        ${negativeFlex.length > 0
+          ? `<p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">${negativeFlex.length} çalışan negatif bakiyede · Toplam açık: ${fmtHours(negativeFlexTotal)}</p>`
+          : `<p class="mt-1 text-xs text-ink-800/50 dark:text-sand-100/45">Şu an negatif bakiyede çalışan yok.</p>`}
+      </div>
+      ${negativeFlex.length > 10 ? `
+      <button data-action="scroll-to" data-value="esnek-bakiye-dagilimi" class="flex items-center gap-1 text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline">
+        Tümünü Gör (${negativeFlex.length}) <i data-lucide="arrow-right" class="w-[12px] h-[12px]"></i>
+      </button>` : ''}
+    </div>
+    ${negativeFlex.length === 0
+      ? `<div class="mt-4 flex items-center gap-2.5 rounded-lg bg-pine-50 dark:bg-pine-900/20 px-4 py-3 text-sm text-pine-700 dark:text-pine-300">
+          <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i> Esnek bakiye açığı bulunmuyor.
+        </div>`
+      : `<div class="mt-4 max-h-72 overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
+          ${negativeFlex.slice(0, 10).map(e => `
+            <div class="flex items-center justify-between gap-3 py-2.5">
+              <div class="min-w-0">
+                <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</p>
+                <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(e.department || '')}</p>
+              </div>
+              <span class="shrink-0 text-sm font-semibold text-brick-500">${fmtHours(e.flex_time_balance)}</span>
+            </div>`).join('')}
+        </div>`}
+  </div>
+
+  <!-- 6. Bugün Kimler Yok -->
   <div id="bugun-devamsiz" class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
     <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Bugün Kimler Yok?</h2>
     ${absentToday.length === 0
-      ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Bugün izinli veya raporlu çalışan yok.</p>`
+      ? `<div class="mt-4 flex items-center gap-2.5 rounded-lg bg-pine-50 dark:bg-pine-900/20 px-4 py-3 text-sm text-pine-700 dark:text-pine-300">
+          <i data-lucide="check-circle-2" class="w-4 h-4 shrink-0"></i> Bugün izinli veya raporlu çalışan bulunmuyor.
+        </div>`
       : `<div class="mt-4 max-h-80 overflow-y-auto divide-y divide-black/5 dark:divide-white/5">
           ${absentToday.map(l => `
             <div class="flex items-center justify-between gap-3 py-2.5">
               <div class="min-w-0">
                 <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.employee_name)}</p>
-                <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.department || '')} · ${escapeHtml(l.end_date)}'e kadar</p>
+                <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.department || '')} · ${fmtShortDate(l.start_date)}–${fmtShortDate(l.end_date)}</p>
               </div>
               <span class="shrink-0 rounded-full px-2.5 py-1 text-[11px] font-medium ${l.kind === 'rapor' ? 'bg-brick-500/10 text-brick-600' : 'bg-gold-500/10 text-gold-600 dark:text-gold-400'}">${l.kind === 'rapor' ? 'Raporlu' : 'İzinli'}</span>
             </div>`).join('')}
         </div>`}
   </div>
 
-  <div class="mt-8">
-    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Dikkat Gereken Çalışanlar</h2>
-    ${panelSectionHtmlInner(employees)}
+  <!-- 7. Dikkat Gereken Çalışanlar (yıllık izni azalanlar) -->
+  <div id="dikkat-gereken" class="mt-8">
+    <h2 class="mb-4 font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yıllık İzni Azalan Çalışanlar</h2>
+    ${miniEmployeePanel(
+      'Yıllık İzni Azalanlar (0-5 gün)', 'palmtree', 'brick', lowLeaveEmployees,
+      'Yıllık izni 5 gün veya altına düşen çalışan yok.',
+      e => `${Math.max(e.annual_leave_total - e.annual_leave_used, 0)} gün`
+    )}
   </div>
 
-  <div class="mt-8 grid gap-5 lg:grid-cols-2">
+  <!-- 8. Bildirimler ve Yaklaşan Kontroller -->
+  <div id="yaklasan-kontroller" class="mt-8 grid gap-5 lg:grid-cols-3">
     <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
       <div class="flex items-center justify-between">
         <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Son Bildirimler</h2>
@@ -1762,49 +1941,52 @@ function adminDashboardView() {
 
     <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
       <div class="flex items-center justify-between">
-        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yaklaşan Periyodik Kontroller</h2>
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yaklaşan Sağlık Kontrolleri</h2>
         <a href="#/admin/periodic-checks" class="flex items-center gap-1 text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline">
           Tümü <i data-lucide="arrow-right" class="w-[12px] h-[12px]"></i>
         </a>
       </div>
-      ${upcomingChecks.length === 0
+      <p class="mt-1 text-xs text-ink-800/45 dark:text-sand-100/40">${upcomingHealthAll.length} kontrol · Önümüzdeki 7 gün</p>
+      ${upcomingHealth.length === 0
         ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Önümüzdeki 7 günde yaklaşan kontrol yok.</p>`
         : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
-            ${upcomingChecks.map(c => `
+            ${upcomingHealth.map(c => `
               <div class="flex items-center justify-between gap-2 py-2.5">
                 <div class="min-w-0">
+                  <p class="text-xs font-semibold text-ink-800/50 dark:text-sand-100/40">${fmtShortDate(c.due_date)}</p>
                   <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(c.employee_name)}</p>
-                  <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)} · ${escapeHtml(c.due_date)}</p>
+                  <p class="truncate text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</p>
                 </div>
-                <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+                <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${STATUS_EMOJI[c.status] || ''} ${PERIODIC_STATUS_LABELS[c.status]}</span>
+              </div>`).join('')}
+          </div>`}
+    </div>
+
+    <div class="card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
+      <div class="flex items-center justify-between">
+        <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Yaklaşan Eğitimler</h2>
+        <a href="#/admin/trainings" class="flex items-center gap-1 text-xs font-medium text-pine-700 dark:text-gold-400 hover:underline">
+          Tümü <i data-lucide="arrow-right" class="w-[12px] h-[12px]"></i>
+        </a>
+      </div>
+      <p class="mt-1 text-xs text-ink-800/45 dark:text-sand-100/40">${upcomingTrainingsAll.length} eğitim · Önümüzdeki 7 gün</p>
+      ${upcomingTrainings.length === 0
+        ? `<p class="mt-4 text-sm text-ink-800/50 dark:text-sand-100/45">Önümüzdeki 7 günde yaklaşan eğitim yok.</p>`
+        : `<div class="mt-4 divide-y divide-black/5 dark:divide-white/5">
+            ${upcomingTrainings.map(c => `
+              <div class="flex items-center justify-between gap-2 py-2.5">
+                <div class="min-w-0">
+                  <p class="text-xs font-semibold text-ink-800/50 dark:text-sand-100/40">${fmtShortDate(c.due_date)}</p>
+                  <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(c.employee_name)}</p>
+                </div>
+                <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${STATUS_EMOJI[c.status] || ''} ${PERIODIC_STATUS_LABELS[c.status]}</span>
               </div>`).join('')}
           </div>`}
     </div>
   </div>
 
-  ${flexBalanceChartHtml(employees)}
-
-  <div class="mt-8 card p-6 bg-white dark:bg-ink-800 rounded-xl2 shadow-soft border border-black/5 dark:border-white/5">
-    <div class="flex items-center justify-between">
-      <h2 class="font-display text-base font-semibold text-ink-900 dark:text-sand-50">Çalışanlar — İzin ve Esnek Saat Durumu</h2>
-      <a href="#/admin/employees" class="flex items-center gap-1 text-sm font-medium text-pine-700 dark:text-gold-400 hover:underline">
-        Tümünü Yönet <i data-lucide="arrow-right" class="w-[14px] h-[14px]"></i>
-      </a>
-    </div>
-    ${employees.length === 0
-      ? `<p class="mt-6 text-sm text-ink-800/50 dark:text-sand-100/45">Henüz çalışan eklenmedi. "Çalışanlar" sayfasından ekleyebilirsiniz.</p>`
-      : `<div class="mt-5 max-h-[420px] overflow-auto">
-          <table class="w-full min-w-[640px] text-left text-sm">
-            <thead class="sticky top-0 bg-white dark:bg-ink-800"><tr class="text-xs text-ink-800/45 dark:text-sand-100/40">
-              <th class="pb-3 pr-3 font-medium">Ad Soyad</th>
-              <th class="pb-3 pr-3 font-medium">Departman</th>
-              <th class="pb-3 pr-3 font-medium">Kalan / Toplam İzin</th>
-              <th class="pb-3 font-medium">Kullanım</th>
-            </tr></thead>
-            <tbody class="divide-y divide-black/5 dark:divide-white/5">${rows}</tbody>
-          </table>
-        </div>`}
-  </div>`;
+  <!-- 9. Esnek Bakiye Dağılımı (detaylı grafik — negatif bakiyenin tam listesi de burada) -->
+  ${flexBalanceChartHtml(employees)}`;
 }
 
 function miniEmployeePanel(title, icon, accent, items, emptyText, valueFn, nameFn) {
@@ -2043,9 +2225,11 @@ function employeeAnalysisView(employeeId) {
   const sickEntries = state.allSickLeaveEntries
     .filter(l => l.employee_id === employeeId)
     .sort((a, b) => new Date(b.start_date || 0) - new Date(a.start_date || 0));
-  const checks = state.periodicChecks
+  const allChecks = state.periodicChecks
     .filter(c => c.employee_id === employeeId)
     .sort((a, b) => new Date(a.due_date || 0) - new Date(b.due_date || 0));
+  const healthChecks = allChecks.filter(c => c.check_type !== 'egitim');
+  const trainings = allChecks.filter(c => c.check_type === 'egitim');
 
   const today = new Date().toISOString().slice(0, 10);
   const currentlyOnLeave = leaveEntries.find(l => l.start_date <= today && today <= l.end_date);
@@ -2101,7 +2285,7 @@ function employeeAnalysisView(employeeId) {
     ${statCard('calendar-days', 'Toplam İzin Kaydı', leaveEntries.length, `${sickEntries.length} rapor kaydı`, 'pine')}
   </div>
 
-  <div class="mt-5 grid gap-5 lg:grid-cols-3">
+  <div class="mt-5 grid gap-5 lg:grid-cols-2">
     ${timelineSection('İzin Geçmişi', 'calendar-days', leaveEntries, 'Henüz izin kaydı yok.', l => `
       <div class="py-2.5">
         <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
@@ -2112,10 +2296,17 @@ function employeeAnalysisView(employeeId) {
         <p class="text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(l.start_date)} — ${escapeHtml(l.end_date)}</p>
         ${l.note ? `<p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(l.note)}</p>` : ''}
       </div>`)}
-    ${timelineSection('Periyodik Kontroller', 'clipboard-list', checks, 'Henüz kontrol kaydı yok.', c => `
+    ${timelineSection('Sağlık Kontrolleri', 'clipboard-list', healthChecks, 'Henüz kontrol kaydı yok.', c => `
       <div class="flex items-center justify-between gap-2 py-2.5">
         <div class="min-w-0">
           <p class="truncate text-sm font-medium text-ink-900 dark:text-sand-50">${escapeHtml(CHECK_TYPE_LABELS[c.check_type] || c.check_type)}</p>
+          <p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(c.due_date)}</p>
+        </div>
+        <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
+      </div>`)}
+    ${timelineSection('Eğitimler', 'graduation-cap', trainings, 'Henüz eğitim kaydı yok.', c => `
+      <div class="flex items-center justify-between gap-2 py-2.5">
+        <div class="min-w-0">
           <p class="text-xs text-ink-800/45 dark:text-sand-100/40">${escapeHtml(c.due_date)}</p>
         </div>
         <span class="shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${PERIODIC_STATUS_COLORS[c.status]}">${PERIODIC_STATUS_LABELS[c.status]}</span>
@@ -2384,6 +2575,7 @@ function announcementModal(ann) {
 
 function periodicCheckModal(check) {
   const isEdit = Boolean(check);
+  const category = state.periodicCheckFormCategory === 'egitim' ? 'egitim' : 'health';
   const knownTypes = ['saglik', 'revir', 'hastane', 'egitim'];
   const isOtherType = isEdit && check.check_type && !knownTypes.includes(check.check_type);
   const employees = state.employees;
@@ -2392,10 +2584,10 @@ function periodicCheckModal(check) {
   <div class="fixed inset-0 z-50 flex items-center justify-center modal-backdrop p-4" data-action="modal-backdrop">
     <div class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-xl2 bg-white dark:bg-ink-800 shadow-soft" data-stop-close>
       <div class="flex items-center justify-between border-b border-black/5 dark:border-white/5 px-6 py-4">
-        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? 'Kontrolü Düzenle' : 'Yeni Periyodik Kontrol'}</h2>
+        <h2 class="font-display text-lg font-semibold text-ink-900 dark:text-sand-50">${isEdit ? (category === 'egitim' ? 'Eğitimi Düzenle' : 'Kontrolü Düzenle') : (category === 'egitim' ? 'Yeni Eğitim' : 'Yeni Sağlık Kontrolü')}</h2>
         <button data-action="close-modal" class="text-ink-800/50 dark:text-sand-100/50"><i data-lucide="x" class="w-5 h-5"></i></button>
       </div>
-      <form id="periodic-check-form" data-id="${isEdit ? check.id : ''}" class="space-y-4 px-6 py-5">
+      <form id="periodic-check-form" data-id="${isEdit ? check.id : ''}" data-category="${category}" class="space-y-4 px-6 py-5">
         <div>
           <label class="label">Çalışan</label>
           <select name="employee_id" required class="input">
@@ -2403,17 +2595,21 @@ function periodicCheckModal(check) {
             ${employees.map(e => `<option value="${e.id}" ${isEdit && check.employee_id === e.id ? 'selected' : ''}>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)} — ${escapeHtml(e.department)}</option>`).join('')}
           </select>
         </div>
+        ${category === 'egitim' ? `
+        <input type="hidden" name="check_type_select" value="egitim" />
+        <div class="rounded-lg bg-sand-50 dark:bg-ink-900 px-3.5 py-2.5 text-sm text-ink-800/70 dark:text-sand-100/60">
+          <i data-lucide="graduation-cap" class="inline w-4 h-4 mr-1.5 align-text-bottom"></i> Eğitim kaydı olarak eklenecek
+        </div>` : `
         <div>
           <label class="label">Kontrol Türü</label>
           <select name="check_type_select" id="check-type-select" class="input">
             <option value="saglik" ${isEdit && check.check_type === 'saglik' ? 'selected' : ''}>Periyodik Sağlık Kontrolü</option>
             <option value="revir" ${isEdit && check.check_type === 'revir' ? 'selected' : ''}>Revir Kontrolü</option>
             <option value="hastane" ${isEdit && check.check_type === 'hastane' ? 'selected' : ''}>Hastane Kontrolü</option>
-            <option value="egitim" ${isEdit && check.check_type === 'egitim' ? 'selected' : ''}>Eğitim</option>
             <option value="__other__" ${isOtherType ? 'selected' : ''}>Diğer (yazın)</option>
           </select>
           <input name="check_type_other" id="check-type-other" class="input mt-2 ${isOtherType ? '' : 'hidden'}" placeholder="Kontrol türünü yazın" value="${isOtherType ? escapeHtml(check.check_type) : ''}" />
-        </div>
+        </div>`}
         <div>
           <label class="label">Tarih</label>
           <input name="due_date" type="date" required class="input" value="${isEdit ? check.due_date : new Date().toISOString().slice(0, 10)}" />
@@ -2427,7 +2623,7 @@ function periodicCheckModal(check) {
         <div id="periodic-check-form-error"></div>
         <div class="flex justify-end gap-3 pt-2">
           <button type="button" data-action="close-modal" class="btn-secondary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-sand-100 text-ink-800 hover:bg-sand-200 dark:bg-ink-700 dark:text-sand-100">Vazgeç</button>
-          <button type="submit" id="periodic-check-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">${isEdit ? 'Değişiklikleri Kaydet' : 'Kontrolü Ekle'}</button>
+          <button type="submit" id="periodic-check-form-submit" class="btn-primary inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-pine-600 text-white hover:bg-pine-700">${isEdit ? 'Değişiklikleri Kaydet' : (category === 'egitim' ? 'Eğitimi Ekle' : 'Kontrolü Ekle')}</button>
         </div>
       </form>
     </div>
@@ -2898,6 +3094,12 @@ document.addEventListener('click', async (e) => {
       render();
       break;
     case 'open-periodic-check-form':
+      state.periodicCheckFormCategory = 'health';
+      state.modal = { type: 'periodic-check', data: null };
+      render();
+      break;
+    case 'open-training-form':
+      state.periodicCheckFormCategory = 'egitim';
       state.modal = { type: 'periodic-check', data: null };
       render();
       break;
@@ -3059,6 +3261,7 @@ document.addEventListener('click', async (e) => {
     }
     case 'edit-periodic-check': {
       const check = state.periodicChecks.find(x => x.id === el.dataset.id);
+      state.periodicCheckFormCategory = check && check.check_type === 'egitim' ? 'egitim' : 'health';
       state.modal = { type: 'periodic-check', data: check };
       render();
       break;
